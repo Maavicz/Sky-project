@@ -15,7 +15,7 @@ import {
   FaUserShield,
   FaUsers,
 } from "react-icons/fa";
-import heroImage from "../imagery/skylog.jpeg";
+import heroImage from "../imagery/happy-new-month.png";
 
 const services = [
   {
@@ -369,7 +369,7 @@ export default function App() {
   const handlePaymentDone = () => {
     setPaymentStage(false);
     navigateTo("track");
-    window.open(`https://wa.me/2349056942355?text=Hello%20SkyBridge%20Logistics%2C%20I%20have%20completed%20payment%20for%20booking%20${recentBookingId}.`, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/2349056942355?text=Hello%20Skybridge%20Nexus%20Logistics%2C%20I%20have%20completed%20payment%20for%20booking%20${recentBookingId}.`, "_blank", "noopener,noreferrer");
   };
 
   const updateStatus = (id, newStatus) => {
@@ -724,16 +724,16 @@ export default function App() {
           <>
             <section className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
               <div className="space-y-8">
-                <div className="inline-flex items-center rounded-full bg-gradient-to-r from-blue-100 to-cyan-100 px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm">
+                <div className="inline-flex items-center rounded-full bg-gradient-to-r from-orange-100 to-amber-100 px-4 py-2 text-sm font-semibold text-orange-700 shadow-sm">
                   <FaTruckMoving className="mr-2" />
-                  Nigeria air cargo & express delivery
+                  Happy New Month from Skybridge Nexus
                 </div>
                 <div className="space-y-6">
                   <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
-                    Delivering speed and certainty across Nigerian skies.
+                    Celebrating fresh momentum for logistics in H2 2026.
                   </h1>
                   <p className="max-w-2xl text-lg leading-8 text-slate-600">
-                    Skybridge Logistics is an air-integrated logistics company that enables same-day and next-day delivery across Nigerian cities using commercial flights. We operate an asset-light model, partnering with airlines like Air Peace and working within airport systems managed by Federal Airports Authority of Nigeria.
+                    Skybridge Nexus Logistics LTD brings branded premium freight and express delivery across Nigerian cities. We combine air cargo expertise with intelligent tracking, secure handling, and reliable last-mile fulfillment.
                   </p>
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <button
@@ -768,14 +768,14 @@ export default function App() {
               <div className="relative overflow-hidden rounded-[2rem] bg-slate-900 shadow-2xl">
                 <img
                   src={heroImage}
-                  alt="Skybridge Logistics branded cargo imagery"
+                  alt="Skybridge Nexus branded cargo imagery"
                   className="h-full w-full object-cover"
                 />
                 <div className="absolute inset-0 bg-gradient-to-br from-blue-950/40 via-slate-950/10 to-transparent"></div>
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/80 to-transparent px-6 py-6 text-white">
-                  <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Skybridge Logistics</p>
+                  <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Skybridge Nexus Logistics LTD</p>
                   <p className="mt-2 max-w-xs text-lg font-semibold">
-                    Bridging distance, delivering speed with integrated airport logistics.
+                    Celebrating the new month with powerful logistics for air, sea, and road cargo.
                   </p>
                 </div>
               </div>
@@ -898,7 +898,7 @@ export default function App() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-blue-700">Book a delivery</p>
-                <h2 className="mt-3 text-3xl font-semibold text-slate-900">Ready to ship with Skybridge?</h2>
+                <h2 className="mt-3 text-3xl font-semibold text-slate-900">Ready to ship with Skybridge Nexus?</h2>
               </div>
               <div className="rounded-full bg-blue-100 px-4 py-2 text-sm font-semibold text-blue-700">
                 Port Harcourt · Lagos · Abuja
@@ -930,7 +930,7 @@ export default function App() {
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Contact</p>
                 <p className="mt-3 text-xl font-semibold">09056942355</p>
-                <p className="mt-2 text-slate-600">skybridgetechnologies.log@gmail.com</p>
+                <p className="mt-2 text-slate-600">contact@skybridgenexus.com</p>
               </div>
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Office</p>
