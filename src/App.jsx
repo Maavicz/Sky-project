@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
+  FaBell,
   FaBoxOpen,
+  FaChartBar,
   FaCheckCircle,
   FaClipboardList,
   FaClock,
@@ -9,13 +11,21 @@ import {
   FaPlane,
   FaRoute,
   FaSearch,
-  FaShieldAlt,
   FaSignOutAlt,
   FaTruckMoving,
   FaUserShield,
+  FaShieldAlt,
   FaUsers,
+  FaWarehouse,
 } from "react-icons/fa";
 import heroImage from "../imagery/happy-new-month.png";
+import Field from "./components/Field.jsx";
+import LoginForm from "./components/LoginForm.jsx";
+import Toasts from "./components/Toasts.jsx";
+import Card from "./components/Card.jsx";
+import TrackSection from "./components/TrackSection.jsx";
+import AlertsPanel from "./components/AlertsPanel.jsx";
+import Cooperate from "./Cooperate.jsx";
 
 const services = [
   {
@@ -66,53 +76,6 @@ const initialTasks = [
   { id: "TSK-003", shipment: "SB-2026-003", task: "Schedule forwarding", assignee: "Team C", status: "Open" },
 ];
 
-const Field = ({ id, label, value, onChange, type = "text", placeholder = "", className = "", ...rest }) => (
-  <label htmlFor={id} className="block text-sm">
-    <div className="font-medium">{label}</div>
-    <input
-      id={id}
-      type={type}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      className={`${className} mt-1 block w-full`}
-      aria-label={label}
-      {...rest}
-    />
-  </label>
-);
-
-const LoginForm = ({ onSubmit, submitText }) => {
-  const [user, setUser] = useState("");
-  const [pass, setPass] = useState("");
-
-  return (
-    <div className="mt-6 space-y-4">
-      <Field
-        id="login-user"
-        label="Username"
-        value={user}
-        onChange={(e) => setUser(e.target.value)}
-        className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-      />
-      <Field
-        id="login-pass"
-        label="Password"
-        type="password"
-        value={pass}
-        onChange={(e) => setPass(e.target.value)}
-        className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-      />
-      <button
-        onClick={() => onSubmit({ user, pass })}
-        className="w-full rounded-3xl bg-blue-700 px-6 py-4 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-800"
-      >
-        {submitText}
-      </button>
-    </div>
-  );
-};
-
 export default function App() {
   const [page, setPage] = useState("home");
   const [role, setRole] = useState("guest");
@@ -143,11 +106,26 @@ export default function App() {
   const [editingProfileId, setEditingProfileId] = useState(null);
   const [profileNotice, setProfileNotice] = useState("");
   const [forwardTargets, setForwardTargets] = useState({});
+  const [autoAssign, setAutoAssign] = useState(false);
 
   const [booking, setBooking] = useState({ pickup: "", delivery: "", weight: "", contact: "" });
   const [recentBookingId, setRecentBookingId] = useState("");
   const [paymentStage, setPaymentStage] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("Bank Transfer");
+  const [paymentDetails, setPaymentDetails] = useState({ cardNumber: "", expiry: "", cvv: "" });
+  const [notifications, setNotifications] = useState([]);
+  const [fraudAlerts, setFraudAlerts] = useState([]);
+  const [trackingDetails, setTrackingDetails] = useState(null);
+  const [warehouses, setWarehouses] = useState([
+    { id: "WH-001", name: "Port Harcourt Cargo Hub", location: "PHC", occupied: 88, capacity: 120, status: "Operational" },
+    { id: "WH-002", name: "Lagos Air Cargo Depot", location: "LOS", occupied: 104, capacity: 140, status: "Operational" },
+    { id: "WH-003", name: "Abuja Transit Warehouse", location: "ABJ", occupied: 59, capacity: 80, status: "Operational" },
+  ]);
+  const [warehouseItems, setWarehouseItems] = useState([
+    { id: "WHI-001", orderId: "SB-2026-001", description: "Consumer electronics", warehouse: "Port Harcourt Cargo Hub", status: "Awaiting dispatch" },
+    { id: "WHI-002", orderId: "SB-2026-002", description: "Medical supplies", warehouse: "Lagos Air Cargo Depot", status: "Cleared" },
+    { id: "WHI-003", orderId: "SB-2026-003", description: "Apparel consignment", warehouse: "Abuja Transit Warehouse", status: "Received" },
+  ]);
   const [clientRegistration, setClientRegistration] = useState({
     companyName: "",
     contactName: "",
@@ -158,9 +136,9 @@ export default function App() {
   const [showClientRegistration, setShowClientRegistration] = useState(false);
 
   const [orders, setOrders] = useState([
-    { id: "SB-2026-001", status: "In Flight", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false },
-    { id: "SB-2026-002", status: "Delivered", route: "PH → Abuja", assignedTo: "Unassigned", pendingApproval: false },
-    { id: "SB-2026-003", status: "At Airport", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false },
+    { id: "SB-2026-001", status: "In Flight", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Paid", cargoStage: "In transit", airportStatus: "Cleared", flagged: false },
+    { id: "SB-2026-002", status: "Delivered", route: "PH → Abuja", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Paid", cargoStage: "Delivered", airportStatus: "Completed", flagged: false },
+    { id: "SB-2026-003", status: "At Airport", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Pending", cargoStage: "Airport processing", airportStatus: "Awaiting clearance", flagged: false },
   ]);
 
   // Persist key names
@@ -205,6 +183,22 @@ export default function App() {
 
   // Performance: memoize derived lists
   const memoActiveSubadmins = useMemo(() => subadminProfiles.filter((p) => p.status === "Active"), [subadminProfiles]);
+  const analyticsMetrics = useMemo(() => {
+    const totalRevenue = orders.reduce(
+      (sum, order) => sum + (order.paymentStatus === "Paid" ? 2500 : 0),
+      0
+    );
+    const pendingPayments = orders.filter((order) => order.paymentStatus === "Pending").length;
+    const fraudCount = fraudAlerts.filter((alert) => alert.active).length;
+    return {
+      totalRevenue,
+      pendingPayments,
+      fraudCount,
+      warehouseUsed: warehouses.reduce((sum, warehouse) => sum + warehouse.occupied, 0),
+      warehouseCapacity: warehouses.reduce((sum, warehouse) => sum + warehouse.capacity, 0),
+    };
+  }, [orders, fraudAlerts, warehouses]);
+
   const filteredUsers = useMemo(() => {
     const term = userSearch.trim().toLowerCase();
     return Object.entries(accounts)
@@ -253,9 +247,38 @@ export default function App() {
 
     setRole(account.role);
     setActiveUser(user.trim());
-    navigateTo(account.role === "client" ? "client" : "admin", { require: [account.role] });
     setAdminTab("overview");
     setLogin({ user: "", pass: "" });
+    setPage(account.role === "client" ? "client" : "admin");
+  };
+
+  const handleClientPortalLogin = ({ user, pass }) => {
+    if (!user.trim() || !pass) {
+      pushToast({ type: "error", message: "Please enter username and password" });
+      return;
+    }
+
+    const account = accounts[user.trim()];
+    if (!account || account.role !== "client") {
+      pushToast({ type: "error", message: "This portal is for corporate clients only." });
+      return;
+    }
+
+    if (account.password !== pass) {
+      pushToast({ type: "error", message: "Invalid login ❌" });
+      return;
+    }
+
+    if (account.status !== "Active") {
+      pushToast({ type: "error", message: account.status === "Suspended" ? "This account is suspended. Contact the admin." : "This account has been terminated." });
+      return;
+    }
+
+    setRole("client");
+    setActiveUser(user.trim());
+    setAdminTab("overview");
+    setLogin({ user: "", pass: "" });
+    setPage("client");
   };
 
   const handleLogout = () => {
@@ -272,12 +295,16 @@ export default function App() {
     return allowedRoles.includes(role);
   };
 
+  const pagePermissions = {
+    admin: ["admin", "subadmin"],
+  };
+
   // Navigation helper that enforces auth for pages that require roles
   const navigateTo = (targetPage, opts = {}) => {
-    const { require = null } = opts;
+    const { require = pagePermissions[targetPage] ?? null } = opts;
     if (require && !requireRole(require)) {
       pushToast({ type: "error", message: "You do not have permission to access that page." });
-      navigateTo("login");
+      setPage("login");
       return;
     }
     setPage(targetPage);
@@ -293,44 +320,47 @@ export default function App() {
     }, t.duration || 4000);
   };
 
-  // Toast UI - simple absolute corner stack
-  const ToastsUI = () => (
-    <div aria-live="polite" className="pointer-events-none fixed right-4 top-4 z-50 flex w-80 flex-col gap-2">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className={`pointer-events-auto rounded-xl p-3 text-sm shadow-lg ${t.type === 'error' ? 'bg-red-600 text-white' : t.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-white'}`}>
-          {t.message}
-        </div>
-      ))}
-    </div>
-  );
+  const createNotification = (notification) => {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    setNotifications((prev) => [{ id, ...notification }, ...prev].slice(0, 5));
+  };
+
+  const createFraudAlert = (orderId, message) => {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    setFraudAlerts((prev) => [{ id, orderId, message, active: true }, ...prev]);
+  };
 
   const trackPackage = () => {
     // Debounced lookup
     if (trackingDebounceRef.current) clearTimeout(trackingDebounceRef.current);
     trackingDebounceRef.current = setTimeout(() => {
       const found = orders.find((o) => o.id.toUpperCase() === trackingInput.toUpperCase());
-      setTrackingResult(found ? `${found.status} — ${found.route}` : "Not Found ❌");
+      if (found) {
+        setTrackingResult(`${found.status} — ${found.route}`);
+        setTrackingDetails({
+          orderId: found.id,
+          status: found.status,
+          route: found.route,
+          currentLocation:
+            found.status === "Delivered"
+              ? "Destination hub"
+              : found.status === "At Airport"
+              ? "Airport cargo terminal"
+              : "Inbound distribution center",
+          timeline: [
+            { label: "Order received", time: "08:12" },
+            { label: "Picked up", time: "09:30" },
+            { label: "In transit", time: "12:45" },
+            { label: found.status, time: "15:20" },
+          ],
+          estimatedDelivery: found.status === "Delivered" ? "Delivered" : "Today 18:00",
+        });
+      } else {
+        setTrackingResult("Not Found ❌");
+        setTrackingDetails(null);
+      }
     }, 250);
   };
-
-  // Small helpers for UI feedback
-  const Field = ({ id, label, value, onChange, type = "text", placeholder = "", className = "", ...rest }) => (
-    <label htmlFor={id} className="block text-sm">
-      <div className="font-medium">{label}</div>
-      <input
-        id={id}
-        type={type}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        className={`${className} mt-1 block w-full`}
-        aria-label={label}
-        {...rest}
-      />
-    </label>
-  );
 
   const handleBook = () => {
     // Basic validation with types
@@ -367,7 +397,30 @@ export default function App() {
   };
 
   const handlePaymentDone = () => {
+    setOrders((prev) =>
+      prev.map((order) =>
+        order.id === recentBookingId
+          ? { ...order, paymentStatus: "Paid", status: "In Flight", cargoStage: "Airport processing" }
+          : order
+      )
+    );
+    createNotification({
+      title: "Payment confirmed",
+      message: `Payment for booking ${recentBookingId} was confirmed. Shipment is now in transit.`,
+      type: "success",
+    });
     setPaymentStage(false);
+    setTrackingResult("In Flight — processing at airport");
+    setTrackingDetails({
+      orderId: recentBookingId,
+      status: "In Flight",
+      route: orders.find((o) => o.id === recentBookingId)?.route || "Unknown route",
+      currentLocation: "Airport cargo terminal",
+      timeline: [
+        { label: "Payment confirmed", time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+      ],
+      estimatedDelivery: "Today 18:00",
+    });
     navigateTo("track");
     window.open(`https://wa.me/2349056942355?text=Hello%20Skybridge%20Nexus%20Logistics%2C%20I%20have%20completed%20payment%20for%20booking%20${recentBookingId}.`, "_blank", "noopener,noreferrer");
   };
@@ -439,6 +492,41 @@ export default function App() {
     );
     setProfileNotice(`Shipment ${id} forwarding declined and returned to current assignee.`);
   };
+
+  // Auto-assign logic: assign unassigned orders to active subadmin profiles
+  const assignUnassignedOrders = () => {
+    const available = activeSubadminProfiles.map((p) => p.username);
+    if (!available || available.length === 0) {
+      pushToast({ type: "error", message: "No active sub-admins available for auto-assignment." });
+      return;
+    }
+    let idx = 0;
+    setOrders((prev) =>
+      prev.map((o) => {
+        if (!o.assignedTo || o.assignedTo === "Unassigned") {
+          const assignTo = available[idx % available.length];
+          idx += 1;
+          return { ...o, assignedTo: assignTo, pendingApproval: false };
+        }
+        return o;
+      })
+    );
+    pushToast({ type: "success", message: "Auto-assigned unassigned shipments." });
+  };
+
+  // When autoAssign is toggled on, run assign immediately; also run when new orders arrive
+  useEffect(() => {
+    if (!autoAssign) return;
+    assignUnassignedOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAssign]);
+
+  useEffect(() => {
+    if (!autoAssign) return;
+    assignUnassignedOrders();
+    // only trigger when orders length changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders.length]);
 
   const assignTask = (id, team) => {
     setTasks((prev) =>
@@ -692,20 +780,29 @@ export default function App() {
             <button onClick={() => navigateTo("book")} className="flex items-center gap-2 rounded-full px-3 py-2 hover:bg-slate-100 hover:text-blue-700">
               <FaPaperPlane /> Book
             </button>
-            <button onClick={() => navigateTo("client")} className="flex items-center gap-2 rounded-full px-3 py-2 hover:bg-slate-100 hover:text-blue-700">
+            <button
+              onClick={() => {
+                if (role === "admin" || role === "subadmin") {
+                  pushToast({ type: "info", message: "Please logout of admin before using the corporate client portal." });
+                } else {
+                  navigateTo("client");
+                }
+              }}
+              className="flex items-center gap-2 rounded-full px-3 py-2 hover:bg-slate-100 hover:text-blue-700"
+            >
               <FaUsers /> Client Portal
             </button>
             <button
               onClick={() => {
                 if (role === "admin" || role === "subadmin") {
-                  navigateTo("admin", { require: ["admin", "subadmin"] });
+                  navigateTo("admin");
                 } else {
                   navigateTo("login");
                 }
               }}
               className="flex items-center gap-2 rounded-full px-3 py-2 hover:bg-slate-100 hover:text-blue-700"
             >
-              <FaUserShield /> Admin
+              <FaUserShield /> {role === "guest" ? "Admin login" : "Admin dashboard"}
             </button>
             {role !== "guest" && (
               <button
@@ -845,51 +942,20 @@ export default function App() {
             </section>
           </>
         )}
-        <ToastsUI />
+        <Toasts toasts={toasts} />
+        
+        
 
         {page === "track" && (
-          <div className="rounded-[2rem] bg-white p-10 shadow-xl ring-1 ring-slate-200 sm:max-w-xl sm:mx-auto">
-            <div className="flex items-center gap-2 text-blue-700">
-              <FaSearch />
-              <h2 className="text-2xl font-semibold text-slate-900">Track Your Package</h2>
-            </div>
-            <p className="mt-2 text-slate-600">Enter your tracking number to get the latest status.</p>
-            <div className="mt-6 space-y-4">
-              <input
-                className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                placeholder="Enter Tracking Number"
-                value={trackingInput}
-                onChange={(e) => setTrackingInput(e.target.value)}
-              />
-              <button
-                onClick={trackPackage}
-                className="w-full rounded-3xl bg-blue-700 px-6 py-4 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-800"
-              >
-                Track Shipment
-              </button>
-              {trackingResult && (
-                <div className="rounded-3xl bg-blue-50 p-4 text-slate-900 shadow-sm">
-                  <span className="font-semibold">Status:</span> {trackingResult}
-                </div>
-              )}
-            </div>
-            <div className="mt-8 rounded-[1.75rem] bg-slate-50 p-6 ring-1 ring-slate-200">
-              <div className="flex items-center gap-2 text-slate-700">
-                <FaClipboardList />
-                <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Sample tracking IDs</p>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {orders.map((order) => (
-                  <button
-                    key={order.id}
-                    onClick={() => setTrackingInput(order.id)}
-                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-blue-400 hover:text-blue-900"
-                  >
-                    {order.id}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+            <TrackSection
+              trackingInput={trackingInput}
+              setTrackingInput={setTrackingInput}
+              trackPackage={trackPackage}
+              trackingResult={trackingResult}
+              trackingDetails={trackingDetails}
+            />
+            <AlertsPanel notifications={notifications} fraudAlerts={fraudAlerts} />
           </div>
         )}
 
@@ -1046,7 +1112,7 @@ export default function App() {
           </div>
         )}
 
-        {page === "client" && role !== "client" && (
+        {page === "client" && role === "guest" && (
           <div className="rounded-[2rem] bg-white p-10 shadow-xl ring-1 ring-slate-200 sm:max-w-md sm:mx-auto">
             <div className="flex items-center gap-2 text-blue-700">
               <FaUsers />
@@ -1055,7 +1121,7 @@ export default function App() {
             <p className="mt-2 text-slate-600">Login to book shipments and track your corporate cargo.</p>
             {!showClientRegistration ? (
               <div className="mt-6 space-y-4">
-                <LoginForm onSubmit={handleLogin} submitText="Enter Portal" />
+                <LoginForm onSubmit={handleClientPortalLogin} submitText="Enter Portal" />
                 <button
                   onClick={() => setShowClientRegistration(true)}
                   className="w-full rounded-3xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-900 transition hover:border-blue-400 hover:text-blue-700"
@@ -1240,15 +1306,17 @@ export default function App() {
                     </div>
                   ) : null}
                   <div>
-                    <h2 className="text-3xl font-semibold text-slate-900">{role === "admin" ? "Admin" : "Sub-admin"} Dashboard</h2>
+                    <h2 className="text-3xl font-semibold text-slate-900">{role === "admin" ? "Admin Dashboard" : `${currentSubadminProfile?.fullName || "Sub-admin"} Dashboard`}</h2>
                     <p className="mt-2 text-slate-600">Manage workflow, assign tasks, and forward shipments.</p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {[
+                    {[
                     { key: "overview", label: "Overview", icon: FaClipboardList },
                     ...(role === "admin" ? [{ key: "profiles", label: "Sub-admin Profiles", icon: FaUsers }] : []),
                     { key: "workflow", label: "Workflow", icon: FaExchangeAlt },
+                    // Sub-admins get a Cooperate panel instead of global admin features
+                    ...(role === "subadmin" ? [{ key: "cooperate", label: "Cooperate", icon: FaChartBar }] : []),
                     { key: "forwarding", label: "Shipment Forwarding", icon: FaRoute },
                   ].map((tab) => {
                     const Icon = tab.icon;
@@ -1274,8 +1342,30 @@ export default function App() {
                   <Card title="In Transit" value={currentOverviewOrders.filter((o) => o.status === "In Flight").length} icon={FaPlane} accent="from-sky-500 to-blue-500" />
                   <Card title="Pending" value={currentOverviewOrders.filter((o) => o.status === "Pending" || o.pendingApproval).length} icon={FaClock} accent="from-amber-500 to-orange-400" />
                 </div>
+                <div className="mt-6 grid gap-6 lg:grid-cols-3">
+                  <Card title="Revenue" value={`₦${analyticsMetrics.totalRevenue.toLocaleString()}`} icon={FaChartBar} accent="from-green-500 to-emerald-500" />
+                  <Card title="Pending payments" value={analyticsMetrics.pendingPayments} icon={FaBell} accent="from-orange-500 to-yellow-500" />
+                  <Card title="Fraud alerts" value={analyticsMetrics.fraudCount} icon={FaShieldAlt} accent="from-rose-500 to-pink-500" />
+                </div>
+                <div className="mt-6 grid gap-6 lg:grid-cols-3">
+                  {warehouses.map((warehouse) => (
+                    <div key={warehouse.id} className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <h3 className="text-lg font-semibold text-slate-900">{warehouse.name}</h3>
+                          <p className="mt-1 text-sm text-slate-600">{warehouse.location}</p>
+                        </div>
+                        <FaWarehouse className="text-2xl text-blue-700" />
+                      </div>
+                      <div className="mt-4 space-y-2 text-slate-600">
+                        <p>Occupied: {warehouse.occupied}/{warehouse.capacity}</p>
+                        <p>Status: {warehouse.status}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
                 {role === "subadmin" && (
-                  <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
+                  <><div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-xl font-semibold text-slate-900">Quick operations</h3>
@@ -1287,7 +1377,18 @@ export default function App() {
                       <button onClick={() => navigateTo("book")} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:border-blue-400 hover:text-blue-700">Book shipment</button>
                       <button onClick={() => setAdminTab("forwarding")} className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200">Open forwarding</button>
                     </div>
-                  </div>
+                  </div><div className="ml-4 flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <span className="text-xs text-slate-500">Auto-assign</span>
+                        <button
+                          onClick={() => setAutoAssign((s) => !s)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoAssign ? "bg-blue-600" : "bg-slate-200"}`}
+                          aria-pressed={autoAssign}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoAssign ? "translate-x-5" : "translate-x-1"}`} />
+                        </button>
+                      </label>
+                    </div></>
                 )}
                 <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
                   <div className="overflow-hidden rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
@@ -1411,7 +1512,7 @@ export default function App() {
                               <div className="flex items-center justify-between gap-3">
                                 <div>
                                   <p className="font-semibold text-slate-900">{username}</p>
-                                  <p className="text-sm text-slate-600">{account.role === "admin" ? "Administrator" : "Sub-admin"}</p>
+                                  <p className="text-sm text-slate-600">{account.role === "admin" ? "Administrator" : account.role === "subadmin" ? (subadminProfiles.find(p => p.username === username)?.fullName || "Sub-admin") : account.role}</p>
                                 </div>
                                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${account.status === "Active" ? "bg-emerald-100 text-emerald-700" : account.status === "Suspended" ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700"}`}>
                                   {account.status}
@@ -1825,29 +1926,21 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {adminTab === "cooperate" && role === "subadmin" && (
+              <div className="mt-6">
+                <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
+                  <h3 className="text-xl font-semibold text-slate-900">Cooperate Panel</h3>
+                  <p className="mt-2 text-slate-600">Tools and views tailored to your assigned shipments.</p>
+                  <div className="mt-4">
+                    <Cooperate orders={visibleOrders} booking={booking} setBooking={setBooking} handleBook={handleBook} />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
-    </div>
-  );
-}
-
-function Card({ title, value, icon: Icon, accent }) {
-  return (
-    <div className={`rounded-[1.75rem] bg-gradient-to-br ${accent} p-[1px] shadow-sm`}>
-      <div className="rounded-[calc(1.75rem-1px)] bg-white p-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm uppercase tracking-[0.28em] text-slate-500">{title}</p>
-            <p className="mt-4 text-3xl font-semibold text-slate-900">{value}</p>
-          </div>
-          {Icon && (
-            <div className="rounded-2xl bg-slate-100 p-3 text-blue-700">
-              <Icon />
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
