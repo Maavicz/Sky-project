@@ -101,6 +101,7 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
               <h3 className="text-lg font-semibold">Quick Booking</h3>
               <p className="mt-2 text-sm text-slate-600">Create a booking for the cooperative workflow.</p>
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <input value={booking.name || ""} onChange={(e)=>setBooking({...booking,name:e.target.value})} className="rounded-md border p-2" placeholder="Customer name" />
                 <input value={booking.pickup} onChange={(e)=>setBooking({...booking,pickup:e.target.value})} className="rounded-md border p-2" placeholder="Pickup" />
                 <input value={booking.delivery} onChange={(e)=>setBooking({...booking,delivery:e.target.value})} className="rounded-md border p-2" placeholder="Delivery" />
                 <input value={booking.weight} onChange={(e)=>setBooking({...booking,weight:e.target.value})} className="rounded-md border p-2" placeholder="Weight (kg)" />
