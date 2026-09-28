@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { validateBooking } from "./testHelpers/validation.mjs";
-import { getAdminTabs, getFutureFlightSchedulePreview } from "./testHelpers/appLogic.mjs";
+import { buildBookingTermsAcceptance, validateBooking, buildPaymentSummary, getPaymentOptions } from "./testHelpers/validation.mjs";
+import { buildInvoiceEmail, buildInvoiceHtml, buildInvoiceNumber, buildMailtoUrl, buildQuoteEmail, formatNaira, SBNL_PAYMENT_ACCOUNT } from "./testHelpers/emailTemplates.mjs";
+import { canAccessTracking, getAdminTabs, getFutureFlightSchedulePreview } from "./testHelpers/appLogic.mjs";
 import {
   FaBell,
   FaBoxOpen,
   FaChartBar,
   FaCheckCircle,
+  FaCopy,
   FaClipboardList,
   FaClock,
   FaEnvelope,
@@ -34,6 +36,7 @@ import Card from "./components/Card.jsx";
 import TrackSection from "./components/TrackSection.jsx";
 import AlertsPanel from "./components/AlertsPanel.jsx";
 import Cooperate from "./Cooperate.jsx";
+import DeliveryTerms, { DELIVERY_TERMS_VERSION } from "./components/DeliveryTerms.jsx";
 
 const services = [
   {
@@ -64,7 +67,7 @@ const faq = [
   },
   {
     question: "Can I track my shipment in real time?",
-    answer: "Yes. Use the Track page and enter your tracking ID to view the latest status update instantly.",
+    answer: "Sign in to the corporate client portal before entering your tracking ID. Updates are provided where available and may be subject to operational or system delays.",
   },
   {
     question: "Which cities do you cover?",
@@ -88,7 +91,7 @@ const testimonials = [
     role: "Operations Manager, CEE Logistics",
   },
   {
-    quote: "We booked a same-day move for urgent medical supplies and the communication from Skybridge Nexus was exceptional from pickup to delivery.",
+    quote: "We booked a same-day move for urgent medical supplies and the communication from Skybridge Nexus Logistic LTD was exceptional from pickup to delivery.",
     name: "Grace T.",
     role: "Procurement Lead, Healthline Nigeria",
   },
@@ -171,14 +174,25 @@ export default function App() {
     { id: "AF-218", airline: "Air France", route: "ABJ → CDG", region: "International", status: "Cancelled", departure: "18:30", arrival: "—", eta: "—", weather: "Heavy rain", gate: "—", notes: "Temporary cancellation due to severe weather and operational reset", risk: "High" },
   ]);
 
-  const [booking, setBooking] = useState({ name: "", pickup: "", delivery: "", weight: "", contact: "" });
+  const [booking, setBooking] = useState({ name: "", email: "", receiverName: "", receiverContact: "", itemDescription: "", quantity: "1", dimensions: "", handlingNotes: "", service: "Sensitive - Next Day", collectionPoint: "", pickup: "", delivery: "", weight: "", contact: "" });
+  const [bankAccountCopied, setBankAccountCopied] = useState(false);
+    const [termsAccepted, setTermsAccepted] = useState(false);
   const [recentBookingId, setRecentBookingId] = useState("");
   const [paymentStage, setPaymentStage] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("Bank Transfer");
-  const [paymentDetails, setPaymentDetails] = useState({ cardNumber: "", expiry: "", cvv: "" });
+  const [paymentDetails, setPaymentDetails] = useState({
+    cardNumber: "",
+    expiry: "",
+    cvv: "",
+    accountName: "Skybridge Nexus Logistics",
+    accountNumber: "",
+    terminalId: "",
+    transactionId: "",
+  });
   const [notifications, setNotifications] = useState([]);
   const [fraudAlerts, setFraudAlerts] = useState([]);
   const [trackingDetails, setTrackingDetails] = useState(null);
+  const [paymentHistory, setPaymentHistory] = useState([]);
   const [warehouses, setWarehouses] = useState([
     { id: "WH-001", name: "Port Harcourt Cargo Hub", location: "PHC", occupied: 88, capacity: 120, status: "Operational" },
     { id: "WH-002", name: "Lagos Air Cargo Depot", location: "LOS", occupied: 104, capacity: 140, status: "Operational" },
@@ -251,7 +265,7 @@ export default function App() {
       (sum, order) => sum + (order.paymentStatus === "Paid" ? 2500 : 0),
       0
     );
-    const pendingPayments = orders.filter((order) => order.paymentStatus === "Pending").length;
+    const pendingPayments = orders.filter((order) => ["Pending", "Awaiting Transfer"].includes(order.paymentStatus)).length;
     const fraudCount = fraudAlerts.filter((alert) => alert.active).length;
     return {
       totalRevenue,
@@ -364,6 +378,11 @@ export default function App() {
 
   // Navigation helper that enforces auth for pages that require roles
   const navigateTo = (targetPage, opts = {}) => {
+    if (targetPage === "track" && !canAccessTracking(role)) {
+      pushToast({ type: "error", message: "Please sign in or create a corporate profile before tracking individual cargo." });
+      setPage("client");
+      return;
+    }
     const { require = pagePermissions[targetPage] ?? null } = opts;
     if (require && !requireRole(require)) {
       pushToast({ type: "error", message: "You do not have permission to access that page." });
@@ -394,6 +413,13 @@ export default function App() {
   };
 
   const trackPackage = () => {
+    if (!canAccessTracking(role)) {
+      pushToast({ type: "error", message: "Please sign in or create a corporate profile before tracking individual cargo." });
+      setPage("client");
+      setTrackingResult("");
+      setTrackingDetails(null);
+      return;
+    }
     // Debounced lookup
     if (trackingDebounceRef.current) clearTimeout(trackingDebounceRef.current);
     trackingDebounceRef.current = setTimeout(() => {
@@ -425,10 +451,98 @@ export default function App() {
     }, 250);
   };
 
+  const getOrderEmailDetails = (order) => {
+    const [pickupCode, deliveryCode] = String(order.route || "").split(" → ");
+    const locationNames = { PHC: "Port Harcourt", LOS: "Lagos", ABJ: "Abuja" };
+    const route = `${locationNames[pickupCode] || pickupCode} to ${locationNames[deliveryCode] || deliveryCode}`;
+    const summary = buildPaymentSummary({ bookingId: order.id, route, weight: order.weight });
+    return {
+      customerName: order.customerName || "Customer",
+      customerEmail: order.customerEmail || "",
+      amount: order.quoteAmount || summary.total,
+      route,
+      service: order.service || "Sensitive - Next Day",
+      collectionPoint: order.collectionPoint || "To be confirmed",
+    };
+  };
+
+  const prepareQuoteEmail = (order) => {
+    if (!order.customerEmail) {
+      pushToast({ type: "error", message: "This booking has no customer email address." });
+      return;
+    }
+    const template = buildQuoteEmail(getOrderEmailDetails(order));
+    setOrders((previous) => previous.map((item) => item.id === order.id ? { ...item, quoteDraftedAt: new Date().toISOString() } : item));
+    window.location.href = buildMailtoUrl(template);
+  };
+
+  const recordQuoteConfirmation = (order) => {
+    const todaySequence = orders.filter((item) => item.createdAt?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length + 1;
+    setOrders((previous) => previous.map((item) => item.id === order.id
+      ? { ...item, quoteConfirmedAt: new Date().toISOString(), quoteConfirmedBy: activeUser, invoiceNumber: item.invoiceNumber || buildInvoiceNumber(new Date(), todaySequence) }
+      : item));
+    pushToast({ type: "success", message: `CONFIRM recorded for ${order.id}. The invoice draft is ready.` });
+  };
+
+  const prepareInvoiceEmail = (order) => {
+    if (!order.quoteConfirmedAt || !order.invoiceNumber) {
+      pushToast({ type: "error", message: "Record the customer's CONFIRM reply before preparing an invoice." });
+      return;
+    }
+    const details = getOrderEmailDetails(order);
+    const template = buildInvoiceEmail({ ...details, service: details.service.split(" - ")[0], invoiceNumber: order.invoiceNumber });
+    setOrders((previous) => previous.map((item) => item.id === order.id ? { ...item, invoiceDraftedAt: new Date().toISOString() } : item));
+    window.location.href = buildMailtoUrl(template);
+  };
+
+  const downloadInvoiceDocument = (order) => {
+    if (!order.quoteConfirmedAt || !order.invoiceNumber) {
+      pushToast({ type: "error", message: "Record the customer's CONFIRM reply before generating an invoice." });
+      return;
+    }
+    const details = getOrderEmailDetails(order);
+    const documentHtml = buildInvoiceHtml({ ...details, service: details.service.split(" - ")[0], invoiceNumber: order.invoiceNumber });
+    const file = new Blob([documentHtml], { type: "text/html;charset=utf-8" });
+    const fileUrl = URL.createObjectURL(file);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = fileUrl;
+    downloadLink.download = `${order.invoiceNumber}.html`;
+    downloadLink.click();
+    setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
+  };
+
+  const confirmTransferReceived = (order) => {
+    const verifiedRider = activeSubadminProfiles.find((profile) => profile.role?.toLowerCase().includes("rider"));
+    setOrders((previous) => previous.map((item) => item.id === order.id
+      ? { ...item, paymentStatus: "Paid", status: verifiedRider ? "In Flight" : "Awaiting Rider Assignment", cargoStage: verifiedRider ? "Airport processing" : "Payment verified", assignedTo: verifiedRider?.username || item.assignedTo || "Unassigned", paymentConfirmedAt: new Date().toISOString() }
+      : item));
+    pushToast({ type: "success", message: verifiedRider ? `Payment verified and ${verifiedRider.fullName} assigned to ${order.id}.` : `Payment verified for ${order.id}; no active rider profile is available to assign.` });
+  };
+
+  const copyBankAccount = async () => {
+    try {
+      await navigator.clipboard.writeText(SBNL_PAYMENT_ACCOUNT.accountNumber);
+      setBankAccountCopied(true);
+      setTimeout(() => setBankAccountCopied(false), 2000);
+    } catch {
+      pushToast({ type: "error", message: "Could not copy account number. Select and copy it manually." });
+    }
+  };
+
   const handleBook = () => {
+    const termsAcceptance = buildBookingTermsAcceptance({
+      accepted: termsAccepted,
+      version: DELIVERY_TERMS_VERSION,
+      acceptedBy: activeUser || booking.name.trim(),
+    });
+    if (!termsAcceptance) {
+      pushToast({ type: "error", message: "Please read and accept the delivery terms before submitting your booking." });
+      return;
+    }
+
     const formIsValid = validateBooking(booking);
     if (!formIsValid.ok) {
-      pushToast({ type: "error", message: "Please enter a valid customer name, route, weight, and phone number." });
+      pushToast({ type: "error", message: "Enter a valid email, sender and receiver contacts, cargo description, quantity, route, and weight." });
       return;
     }
 
@@ -442,12 +556,25 @@ export default function App() {
       pendingApproval: false,
       weight: booking.weight,
       contact: booking.contact,
+      customerName: booking.name.trim(),
+      customerEmail: booking.email.trim(),
+      receiverName: booking.receiverName.trim(),
+      receiverContact: booking.receiverContact.trim(),
+      itemDescription: booking.itemDescription.trim(),
+      quantity: Number(booking.quantity),
+      dimensions: booking.dimensions.trim(),
+      handlingNotes: booking.handlingNotes.trim(),
+      service: booking.service,
+      collectionPoint: booking.collectionPoint,
+      quoteAmount: buildPaymentSummary({ bookingId: newId, route: `${booking.pickup} → ${booking.delivery}`, weight: booking.weight }).total,
+      termsAcceptance,
       createdAt: new Date().toISOString(),
     };
 
     setOrders((prev) => [newOrder, ...prev]);
     setRecentBookingId(newId);
-    setBooking({ name: "", pickup: "", delivery: "", weight: "", contact: "" });
+    setBooking({ name: "", email: "", receiverName: "", receiverContact: "", itemDescription: "", quantity: "1", dimensions: "", handlingNotes: "", service: "Sensitive - Next Day", collectionPoint: "", pickup: "", delivery: "", weight: "", contact: "" });
+    setTermsAccepted(false);
     setPaymentStage(true);
     setTrackingInput(newId);
     setTrackingResult("Pending");
@@ -455,6 +582,32 @@ export default function App() {
   };
 
   const handlePaymentDone = () => {
+    if (paymentMethod !== "Bank Transfer") {
+      pushToast({ type: "error", message: "This payment provider is not connected yet. Please use bank transfer." });
+      return;
+    }
+    const validation = validatePaymentDetails({ ...paymentDetails, method: paymentMethod });
+    if (!validation.ok) {
+      pushToast({ type: "error", message: validation.message });
+      return;
+    }
+
+    const currentBooking = orders.find((order) => order.id === recentBookingId) || null;
+    if (paymentMethod === "Bank Transfer") {
+      setOrders((previous) => previous.map((order) => order.id === recentBookingId
+        ? { ...order, paymentStatus: "Awaiting Transfer", status: "Pending Payment" }
+        : order));
+      setPaymentStage(false);
+      pushToast({ type: "info", message: "Transfer instructions confirmed. Shipment remains pending until SBNL verifies payment." });
+      return;
+    }
+    const paymentSummary = buildPaymentSummary({
+      bookingId: recentBookingId,
+      route: currentBooking?.route || booking.pickup && booking.delivery ? `${booking.pickup} → ${booking.delivery}` : "Route pending",
+      weight: currentBooking?.weight || booking.weight || "0",
+      paymentMethod,
+    });
+
     setOrders((prev) =>
       prev.map((order) =>
         order.id === recentBookingId
@@ -462,6 +615,17 @@ export default function App() {
           : order
       )
     );
+    setPaymentHistory((prev) => [
+      {
+        id: `PAY-${Date.now()}`,
+        bookingId: recentBookingId,
+        method: paymentMethod,
+        route: paymentSummary.route,
+        amount: paymentSummary.total,
+        createdAt: new Date().toISOString(),
+      },
+      ...prev,
+    ].slice(0, 6));
     createNotification({
       title: "Payment confirmed",
       message: `Payment for booking ${recentBookingId} was confirmed. Shipment is now in transit.`,
@@ -472,16 +636,62 @@ export default function App() {
     setTrackingDetails({
       orderId: recentBookingId,
       status: "In Flight",
-      route: orders.find((o) => o.id === recentBookingId)?.route || "Unknown route",
+      route: currentBooking?.route || "Unknown route",
       currentLocation: "Airport cargo terminal",
       timeline: [
         { label: "Payment confirmed", time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
       ],
       estimatedDelivery: "Today 18:00",
     });
+    setPaymentDetails({
+      cardNumber: "",
+      expiry: "",
+      cvv: "",
+      accountName: "Skybridge Nexus Logistics",
+      accountNumber: "",
+      terminalId: "",
+      transactionId: "",
+    });
     navigateTo("track");
     window.open(`https://wa.me/2349165000149?text=Hello%20Skybridge%20Nexus%20Logistics%2C%20I%20have%20completed%20payment%20for%20booking%20${recentBookingId}.`, "_blank", "noopener,noreferrer");
   };
+
+  const currentPaymentSummary = recentBookingId
+    ? buildPaymentSummary({
+        bookingId: recentBookingId,
+        route: orders.find((order) => order.id === recentBookingId)?.route || `${booking.pickup || "PHC"} → ${booking.delivery || "LOS"}`,
+        weight: orders.find((order) => order.id === recentBookingId)?.weight || booking.weight || "0",
+        paymentMethod,
+      })
+    : null;
+
+  const paymentMethodFields = {
+    "Card Payment": (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+        Card processing is not connected yet. Do not enter or send card details here. Select Bank Transfer to use the verified company account.
+      </div>
+    ),
+    "Bank Transfer": (
+      <div className="overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-4 bg-emerald-800 px-5 py-4 text-white">
+          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-100">Company bank transfer</p><p className="mt-1 text-lg font-semibold">{SBNL_PAYMENT_ACCOUNT.bank}</p></div>
+          <span className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-xs font-semibold">NGN · Naira</span>
+        </div>
+        <div className="space-y-4 p-5">
+          <div><p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Account number</p><div className="mt-1 flex items-center justify-between gap-3"><p className="font-mono text-2xl font-bold tracking-[0.08em] text-slate-900">{SBNL_PAYMENT_ACCOUNT.accountNumber}</p><button type="button" onClick={copyBankAccount} aria-label="Copy account number" className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><FaCopy /> {bankAccountCopied ? "Copied" : "Copy"}</button></div></div>
+          <div className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-100 pt-4"><div><p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Account name</p><p className="mt-1 font-semibold text-slate-900">{SBNL_PAYMENT_ACCOUNT.accountName}</p></div><div className="text-right"><p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Amount due</p><p className="mt-1 text-xl font-bold text-emerald-800">{formatNaira(currentPaymentSummary?.total || 0)}</p></div></div>
+          <p className="rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-900">Use your booking reference <strong>{recentBookingId}</strong> as the transfer narration. Your shipment is not marked paid until our team verifies the funds.</p>
+        </div>
+      </div>
+    ),
+    "POS Payment": (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+        POS processing is not connected yet. No payment will be marked complete with this option. Please select Bank Transfer.
+      </div>
+    ),
+  };
+
+  const paymentOptions = getPaymentOptions();
 
   const updateStatus = (id, newStatus) => {
     setOrders((prev) =>
@@ -915,13 +1125,16 @@ export default function App() {
               <FaPlane className="text-lg" />
             </div>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-500">SkyBridge</p>
-              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-800">Logistics</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-500">SBNL</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-800">Delivery</p>
             </div>
           </div>
           <nav className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-700">
             <button onClick={() => navigateTo("home")} className="flex items-center gap-2 rounded-full px-3 py-2 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-50 hover:text-blue-700">
               <FaPlane /> Home
+            </button>
+            <button onClick={() => navigateTo("about")} className="flex items-center gap-2 rounded-full px-3 py-2 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-50 hover:text-blue-700">
+              About
             </button>
             <button onClick={() => navigateTo("track")} className="flex items-center gap-2 rounded-full px-3 py-2 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-50 hover:text-blue-700">
               <FaSearch /> Track
@@ -982,7 +1195,7 @@ export default function App() {
                       Move freight with the speed of a startup and the trust of a platform.
                     </h1>
                     <p className="max-w-xl text-lg leading-8 text-slate-600">
-                      Skybridge Nexus Logistics combines premium airport coordination, real-time tracking, and smarter delivery operations for businesses that need dependable movement at scale.
+                      Skybridge Nexus Logistic LTD combines premium airport coordination, real-time tracking, and smarter delivery operations for businesses that need dependable movement at scale.
                     </p>
                     <div className="flex flex-col gap-3 sm:flex-row">
                       <button
@@ -1021,12 +1234,12 @@ export default function App() {
                   <div className="group relative overflow-hidden rounded-[2rem] border border-slate-200 bg-slate-900 shadow-[0_35px_90px_rgba(15,23,42,0.18)]">
                     <img
                       src={heroImage}
-                      alt="Skybridge Nexus branded cargo imagery"
+                      alt="Skybridge Nexus Logistic LTD branded cargo imagery"
                       className="h-[430px] w-full object-cover transition duration-500 group-hover:scale-105"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/10 to-transparent"></div>
                     <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4 backdrop-blur-md text-white shadow-xl">
-                      <p className="text-[10px] uppercase tracking-[0.3em] text-slate-300">Skybridge Nexus Logistics LTD</p>
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-slate-300">SBNL Delivery · sbnldelivery.com</p>
                       <p className="mt-2 max-w-xs text-lg font-semibold">
                         Live cargo tracking, delivery automation, and premium route operations.
                       </p>
@@ -1216,8 +1429,8 @@ export default function App() {
             <footer className="mt-14 rounded-[2rem] bg-slate-900 p-8 text-white shadow-2xl ring-1 ring-white/10">
               <div className="grid gap-8 lg:grid-cols-[1.1fr_0.7fr_0.7fr_0.9fr]">
                 <div>
-                  <p className="text-sm uppercase tracking-[0.3em] text-slate-300">SkyBridge Nexus</p>
-                  <h3 className="mt-4 text-2xl font-semibold">Logistics with speed, structure, and trust.</h3>
+                  <p className="text-sm uppercase tracking-[0.3em] text-slate-300">Skybridge Nexus Logistic LTD</p>
+                  <h3 className="mt-4 text-2xl font-semibold">SBNL Delivery — logistics with speed, structure, and trust.</h3>
                   <p className="mt-4 max-w-md text-slate-300">
                     We connect businesses across Nigeria with dependable air, road, and cargo logistics support backed by real-time shipment visibility.
                   </p>
@@ -1226,19 +1439,20 @@ export default function App() {
                 <div>
                   <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Company</p>
                   <ul className="mt-4 space-y-3 text-slate-300">
-                    <li className="transition hover:text-white">About us</li>
-                    <li className="transition hover:text-white">Our services</li>
-                    <li className="transition hover:text-white">Tracking</li>
-                    <li className="transition hover:text-white">Client portal</li>
+                    <li><button type="button" onClick={() => navigateTo("about")} className="text-left transition hover:text-white">About us</button></li>
+                    <li><button type="button" onClick={() => navigateTo("book")} className="text-left transition hover:text-white">Our services</button></li>
+                    <li><button type="button" onClick={() => navigateTo("track")} className="text-left transition hover:text-white">Tracking</button></li>
+                    <li><button type="button" onClick={() => navigateTo("client")} className="text-left transition hover:text-white">Client portal</button></li>
+                    <li><button type="button" onClick={() => navigateTo("terms")} className="text-left transition hover:text-white">Delivery terms</button></li>
                   </ul>
                 </div>
 
                 <div>
                   <p className="text-sm uppercase tracking-[0.3em] text-slate-400">Contact</p>
                   <ul className="mt-4 space-y-3 text-slate-300">
-                    <li className="flex items-center gap-2"><FaPhoneAlt className="text-blue-400" /> 09165000149</li>
-                    <li className="flex items-center gap-2"><FaEnvelope className="text-blue-400" /> contact@skybridgenexus.com</li>
-                    <li className="flex items-center gap-2"><FaMapMarkerAlt className="text-blue-400" /> Port Harcourt, Lagos, Abuja</li>
+                    <li><a href="tel:+2349165000149" className="flex items-center gap-2 transition hover:text-white"><FaPhoneAlt className="text-blue-400" /> 09165000149</a></li>
+                    <li><a href="mailto:hello@sbnldelivery.com" className="flex items-center gap-2 transition hover:text-white"><FaEnvelope className="text-blue-400" /> hello@sbnldelivery.com</a></li>
+                    <li><a href="https://maps.google.com/?q=Port+Harcourt+Lagos+Abuja" target="_blank" rel="noreferrer" className="flex items-center gap-2 transition hover:text-white"><FaMapMarkerAlt className="text-blue-400" /> Port Harcourt, Lagos, Abuja</a></li>
                   </ul>
                 </div>
 
@@ -1253,7 +1467,7 @@ export default function App() {
               </div>
 
               <div className="mt-8 border-t border-white/10 pt-6 text-sm text-slate-400">
-                © 2026 SkyBridge Nexus Logistics LTD. All rights reserved.
+                © 2026 Skybridge Nexus Logistic LTD. All rights reserved.
               </div>
             </footer>
           </>
@@ -1261,6 +1475,88 @@ export default function App() {
         <Toasts toasts={toasts} />
         
         
+
+        {page === "about" && (
+          <div className="space-y-8">
+            <section className="relative overflow-hidden rounded-3xl bg-slate-950 px-6 py-12 text-white sm:px-10 lg:px-14 lg:py-16">
+              <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-gradient-to-l from-blue-700/50 to-transparent lg:block" />
+              <div className="relative max-w-3xl">
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">About Skybridge</p>
+                <h1 className="mt-4 text-4xl font-bold leading-tight sm:text-5xl">Logistics built around clear handoffs and dependable movement.</h1>
+                <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">Skybridge Nexus Logistics LTD helps businesses coordinate cargo movement across key Nigerian routes, connecting booking, transport coordination, shipment visibility, and delivery communication in one service.</p>
+                <div className="mt-8 flex flex-wrap gap-3">
+                  <button type="button" onClick={() => navigateTo("book")} className="min-h-11 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100">Book a delivery</button>
+                  <a href="mailto:hello@sbnldelivery.com" className="inline-flex min-h-11 items-center rounded-xl border border-white/30 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10">Talk to our team</a>
+                </div>
+              </div>
+            </section>
+
+            <section className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr]">
+              <div className="rounded-3xl bg-white p-7 shadow-sm ring-1 ring-slate-200 sm:p-9">
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-700">Who we are</p>
+                <h2 className="mt-3 text-2xl font-bold text-slate-900">Skybridge Nexus Logistics LTD</h2>
+                <p className="mt-4 leading-7 text-slate-600">SBNL Delivery is the customer-facing service of Skybridge Nexus Logistics LTD. We coordinate air-integrated and ground logistics with a focus on practical communication, accountable shipment handoffs, and useful status visibility.</p>
+                <p className="mt-4 leading-7 text-slate-600">Our operating model brings together customer booking information, route planning, airport and carrier coordination, and delivery follow-through. Each shipment has different handling and timing needs, so clear information at booking is an important part of a reliable service.</p>
+              </div>
+              <div className="rounded-3xl bg-blue-50 p-7 ring-1 ring-blue-100 sm:p-9">
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-700">Our approach</p>
+                <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                  {[
+                    ["Coordinate", "Plan pickup, route, carrier, and handoff requirements around the shipment."],
+                    ["Communicate", "Keep customers informed about booking, payment, documentation, and delivery coordination."],
+                    ["Handle responsibly", "Use the information provided to identify handling needs and applicable restrictions."],
+                    ["Make progress visible", "Provide tracking updates where available, while recognizing that operational updates can be delayed."],
+                  ].map(([title, text]) => (
+                    <div key={title} className="border-l-2 border-blue-600 pl-4">
+                      <h3 className="font-semibold text-slate-900">{title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-3xl bg-white p-7 shadow-sm ring-1 ring-slate-200 sm:p-9">
+              <div className="max-w-2xl">
+                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-700">What we coordinate</p>
+                <h2 className="mt-3 text-2xl font-bold text-slate-900">Service support for the shipment journey</h2>
+                <p className="mt-3 leading-7 text-slate-600">Service availability, timing, and charges depend on the route, cargo, carrier, operational conditions, and any special requirements confirmed for a booking.</p>
+              </div>
+              <div className="mt-7 grid gap-4 md:grid-cols-2">
+                {services.map((service, index) => (
+                  <div key={service.title} className="flex gap-4 rounded-2xl border border-slate-200 p-5">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-700 text-sm font-bold text-white">0{index + 1}</span>
+                    <div><h3 className="font-semibold text-slate-900">{service.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{service.description}</p></div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="grid gap-6 md:grid-cols-3">
+              {[
+                ["01", "Share accurate details", "Tell us what is being sent, who will receive it, and any packaging or handling needs."],
+                ["02", "Confirm the service", "We coordinate booking details and communicate applicable service or additional charges."],
+                ["03", "Follow the handoff", "Use available shipment updates and stay reachable for verification and delivery coordination."],
+              ].map(([number, title, text]) => (
+                <div key={number} className="border-t-2 border-blue-700 bg-white p-6 shadow-sm ring-1 ring-slate-200">
+                  <p className="text-sm font-bold text-blue-700">{number}</p><h3 className="mt-3 text-lg font-semibold text-slate-900">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+                </div>
+              ))}
+            </section>
+
+            <section className="flex flex-col gap-5 rounded-3xl bg-emerald-50 p-7 ring-1 ring-emerald-200 sm:flex-row sm:items-center sm:justify-between sm:p-9">
+              <div><h2 className="text-xl font-bold text-slate-900">Need to discuss a shipment?</h2><p className="mt-2 text-slate-700">Contact our team before booking if your cargo is fragile, restricted, valuable, perishable, or requires special handling.</p></div>
+              <div className="flex shrink-0 flex-wrap gap-3">
+                <a href="tel:+2349165000149" className="inline-flex min-h-11 items-center rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-800">Call 09165000149</a>
+                <button type="button" onClick={() => navigateTo("terms")} className="min-h-11 rounded-xl border border-emerald-800/30 px-5 py-3 text-sm font-semibold text-emerald-900 hover:bg-emerald-100">Read delivery terms</button>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {page === "terms" && (
+          <DeliveryTerms onReturn={() => navigateTo(role === "client" ? "client" : "book")} />
+        )}
 
         {page === "track" && (
           <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
@@ -1280,7 +1576,7 @@ export default function App() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-blue-700">Book a delivery</p>
-                <h2 className="mt-3 text-3xl font-semibold text-slate-900">Ready to ship with Skybridge Nexus?</h2>
+                <h2 className="mt-3 text-3xl font-semibold text-slate-900">Ready to ship with SBNL Delivery?</h2>
               </div>
               <div className="rounded-full bg-blue-100 px-4 py-2 text-sm font-semibold text-blue-700">
                 Port Harcourt · Lagos · Abuja
@@ -1312,7 +1608,7 @@ export default function App() {
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Contact</p>
                 <p className="mt-3 text-xl font-semibold">09165000149</p>
-                <p className="mt-2 text-slate-600">contact@skybridgenexus.com</p>
+                <p className="mt-2 text-slate-600">hello@sbnldelivery.com</p>
               </div>
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Office</p>
@@ -1332,6 +1628,16 @@ export default function App() {
                   placeholder="e.g. Ada Okafor"
                   className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                 />
+                <Field
+                  id="customer-email"
+                  label="Customer Email"
+                  type="email"
+                  value={booking.email}
+                  onChange={(e) => setBooking({ ...booking, email: e.target.value })}
+                  placeholder="you@example.com"
+                  className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  autoComplete="email"
+                />
                 <label className="block text-sm">
                   <div className="font-medium">Pickup Location</div>
                   <select
@@ -1347,6 +1653,7 @@ export default function App() {
                   </select>
                 </label>
                 <select
+                  aria-label="Delivery Location"
                   className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   value={booking.delivery}
                   onChange={(e) => setBooking({ ...booking, delivery: e.target.value })}
@@ -1356,6 +1663,23 @@ export default function App() {
                   <option value="LOS">Lagos</option>
                   <option value="ABJ">Abuja</option>
                 </select>
+                <label className="block text-sm font-medium text-slate-700">
+                  Service
+                  <select value={booking.service} onChange={(e) => setBooking({ ...booking, service: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                    <option>Sensitive - Next Day</option>
+                    <option>Next Day</option>
+                    <option>Same Day</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  WareHub Collection Point
+                  <select value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                    <option value="">Choose a collection point</option>
+                    <option>Port Harcourt WareHub</option>
+                    <option>Lagos WareHub</option>
+                    <option>Abuja WareHub</option>
+                  </select>
+                </label>
                 <Field
                   id="weight"
                   label="Package Weight (kg)"
@@ -1372,6 +1696,49 @@ export default function App() {
                   placeholder="e.g. 08012345678"
                   className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                 />
+                <Field
+                  id="receiver-name"
+                  label="Receiver Name"
+                  value={booking.receiverName}
+                  onChange={(e) => setBooking({ ...booking, receiverName: e.target.value })}
+                  placeholder="e.g. Tunde Bello"
+                  className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+                <Field
+                  id="receiver-contact"
+                  label="Receiver Contact Number"
+                  value={booking.receiverContact}
+                  onChange={(e) => setBooking({ ...booking, receiverContact: e.target.value })}
+                  placeholder="e.g. 08087654321"
+                  className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+                <Field
+                  id="item-description"
+                  label="Cargo Description"
+                  value={booking.itemDescription}
+                  onChange={(e) => setBooking({ ...booking, itemDescription: e.target.value })}
+                  placeholder="Describe the shipment contents"
+                  className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+                <label className="block text-sm font-medium text-slate-700">
+                  Quantity
+                  <input type="number" min="1" step="1" value={booking.quantity} onChange={(e) => setBooking({ ...booking, quantity: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Dimensions (optional)
+                  <input value={booking.dimensions} onChange={(e) => setBooking({ ...booking, dimensions: e.target.value })} placeholder="Length × width × height" className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                </label>
+                <label className="block text-sm font-medium text-slate-700 sm:col-span-2">
+                  Special handling requirements (optional)
+                  <textarea value={booking.handlingNotes} onChange={(e) => setBooking({ ...booking, handlingNotes: e.target.value })} rows="3" className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                </label>
+              </div>
+              <div className="mt-6 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <input id="booking-terms" type="checkbox" aria-required="true" aria-describedby="booking-terms-description" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-blue-700" />
+                <div id="booking-terms-description" className="text-sm leading-6 text-slate-700">
+                  <label htmlFor="booking-terms">I have read and agree to the Delivery Booking Terms &amp; Conditions.</label>
+                  <button type="button" onClick={() => navigateTo("terms")} className="ml-1 font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-900">Read the full terms</button>
+                </div>
               </div>
               <button
                 onClick={handleBook}
@@ -1394,22 +1761,43 @@ export default function App() {
                 <h3 className="mt-3 text-xl font-semibold">Complete your booking payment</h3>
                 <p className="mt-2 text-slate-600">Your shipment has been reserved. Please confirm payment to activate the booking and notify our team.</p>
                 <div className="mt-6 space-y-4">
-                  <select
-                    className="w-full rounded-3xl border border-slate-200 bg-white px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                  >
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="Card Payment">Card Payment</option>
-                    <option value="POS Payment">POS Payment</option>
-                  </select>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {paymentOptions.map((option) => (
+                      <button
+                        key={option.method}
+                        type="button"
+                        onClick={() => setPaymentMethod(option.method)}
+                        className={`rounded-3xl border p-4 text-left transition ${paymentMethod === option.method ? "border-blue-500 bg-blue-50 shadow-sm ring-2 ring-blue-200" : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"}`}
+                      >
+                        <p className="text-sm font-semibold text-slate-900">{option.label}</p>
+                        <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">{option.subtitle}</p>
+                        <p className="mt-3 text-xs leading-5 text-slate-600">{option.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                  {currentPaymentSummary && (
+                    <div className="rounded-3xl border border-blue-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
+                      <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-slate-500">
+                        <span>Invoice</span>
+                        <span>{currentPaymentSummary.bookingId}</span>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        <div className="flex justify-between"><span>Route</span><span className="font-medium text-slate-900">{currentPaymentSummary.route}</span></div>
+                        <div className="flex justify-between"><span>Weight</span><span className="font-medium text-slate-900">{currentPaymentSummary.weight} kg</span></div>
+                        <div className="flex justify-between"><span>Base amount</span><span className="font-medium text-slate-900">₦{currentPaymentSummary.amount.toLocaleString()}</span></div>
+                        <div className="flex justify-between"><span>Service fee</span><span className="font-medium text-slate-900">₦{currentPaymentSummary.fee.toLocaleString()}</span></div>
+                        <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-semibold text-slate-900"><span>Total</span><span>₦{currentPaymentSummary.total.toLocaleString()}</span></div>
+                      </div>
+                    </div>
+                  )}
+                  {paymentMethodFields[paymentMethod]}
                   <button
                     onClick={handlePaymentDone}
                     className="w-full rounded-3xl bg-blue-700 px-6 py-4 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-800"
                   >
-                    I have paid · Contact CRM
+                    {paymentMethod === "Bank Transfer" ? "I have made the transfer" : "Confirm payment"}
                   </button>
-                  <p className="text-sm text-slate-600">A WhatsApp message will be sent to our CRM line: 09165000149.</p>
+                  <p className="text-sm text-slate-600">{paymentMethod === "Bank Transfer" ? "This records a transfer notification only. SBNL will verify funds before marking the shipment paid." : "Card and POS processing require a connected payment provider; this demo does not charge a payment method."}</p>
                 </div>
               </div>
             )}
@@ -1521,7 +1909,17 @@ export default function App() {
                     value={booking.name}
                     onChange={(e) => setBooking({ ...booking, name: e.target.value })}
                   />
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    aria-label="Customer email"
+                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="Customer email"
+                    value={booking.email}
+                    onChange={(e) => setBooking({ ...booking, email: e.target.value })}
+                  />
                   <select
+                    aria-label="Delivery location"
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     value={booking.pickup}
                     onChange={(e) => setBooking({ ...booking, pickup: e.target.value })}
@@ -1541,6 +1939,23 @@ export default function App() {
                     <option value="LOS">Lagos</option>
                     <option value="ABJ">Abuja</option>
                   </select>
+                  <label className="block text-sm font-medium text-slate-700">
+                    Service
+                    <select value={booking.service} onChange={(e) => setBooking({ ...booking, service: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                      <option>Sensitive - Next Day</option>
+                      <option>Next Day</option>
+                      <option>Same Day</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium text-slate-700">
+                    WareHub Collection Point
+                    <select value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                      <option value="">Choose a collection point</option>
+                      <option>Port Harcourt WareHub</option>
+                      <option>Lagos WareHub</option>
+                      <option>Abuja WareHub</option>
+                    </select>
+                  </label>
                   <input
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     placeholder="Package Weight (kg)"
@@ -1553,6 +1968,53 @@ export default function App() {
                     value={booking.contact}
                     onChange={(e) => setBooking({ ...booking, contact: e.target.value })}
                   />
+                  <input
+                    aria-label="Receiver name"
+                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="Receiver name"
+                    value={booking.receiverName}
+                    onChange={(e) => setBooking({ ...booking, receiverName: e.target.value })}
+                  />
+                  <input
+                    aria-label="Receiver contact number"
+                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="Receiver contact number"
+                    value={booking.receiverContact}
+                    onChange={(e) => setBooking({ ...booking, receiverContact: e.target.value })}
+                  />
+                  <input
+                    aria-label="Cargo description"
+                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="Cargo description"
+                    value={booking.itemDescription}
+                    onChange={(e) => setBooking({ ...booking, itemDescription: e.target.value })}
+                  />
+                  <label className="block text-sm font-medium text-slate-700">
+                    Quantity
+                    <input type="number" min="1" step="1" value={booking.quantity} onChange={(e) => setBooking({ ...booking, quantity: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                  </label>
+                  <input
+                    aria-label="Dimensions (optional)"
+                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="Dimensions (optional)"
+                    value={booking.dimensions}
+                    onChange={(e) => setBooking({ ...booking, dimensions: e.target.value })}
+                  />
+                  <textarea
+                    aria-label="Special handling requirements (optional)"
+                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="Special handling requirements (optional)"
+                    value={booking.handlingNotes}
+                    onChange={(e) => setBooking({ ...booking, handlingNotes: e.target.value })}
+                    rows="3"
+                  />
+                  <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <input id="corporate-booking-terms" type="checkbox" aria-required="true" aria-describedby="corporate-booking-terms-description" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-blue-700" />
+                    <div id="corporate-booking-terms-description" className="text-sm leading-6 text-slate-700">
+                      <label htmlFor="corporate-booking-terms">I have read and agree to the Delivery Booking Terms &amp; Conditions.</label>
+                      <button type="button" onClick={() => navigateTo("terms")} className="ml-1 font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-900">Read the full terms</button>
+                    </div>
+                  </div>
                   <button
                     onClick={handleBook}
                     className="w-full rounded-3xl bg-blue-700 px-6 py-4 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-800"
@@ -1561,6 +2023,15 @@ export default function App() {
                   </button>
                 </div>
               </div>
+              {paymentStage && recentBookingId && (
+                <div className="rounded-[2rem] border border-emerald-200 bg-white p-6 shadow-xl lg:col-start-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800">Booking payment</p>
+                  <h3 className="mt-2 text-xl font-semibold text-slate-900">Transfer for {recentBookingId}</h3>
+                  <p className="mt-2 mb-4 text-sm text-slate-600">Your booking is reserved. Transfer confirmation is not payment verification.</p>
+                  {paymentMethodFields["Bank Transfer"]}
+                  <button type="button" onClick={handlePaymentDone} className="mt-4 w-full rounded-2xl bg-emerald-800 px-5 py-4 text-sm font-semibold text-white hover:bg-emerald-900">I have made the transfer</button>
+                </div>
+              )}
               <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
                 <h3 className="text-xl font-semibold text-slate-900">Track a shipment</h3>
                 <p className="mt-2 text-slate-600">Use your corporate tracking reference to view delivery progress.</p>
@@ -1586,34 +2057,68 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <div className="rounded-[2rem] bg-slate-50 p-6 shadow-xl ring-1 ring-slate-200">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Recent corporate activity</p>
-                  <p className="mt-2 text-slate-600">Search and review corporate bookings in real time.</p>
-                </div>
-                <input
-                  type="search"
-                  value={clientOrderSearch}
-                  onChange={(e) => setClientOrderSearch(e.target.value)}
-                  placeholder="Search bookings..."
-                  className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 sm:w-80"
-                  aria-label="Search corporate bookings"
-                />
-              </div>
-              <div className="mt-4 grid gap-3">
-                {filteredClientOrders.length === 0 ? (
-                  <div className="rounded-3xl bg-white p-4 text-slate-700 shadow-sm ring-1 ring-slate-200">
-                    No corporate bookings matched your search.
+            <div className="grid gap-6 xl:grid-cols-[1.4fr_0.9fr]">
+              <div className="rounded-[2rem] bg-slate-50 p-6 shadow-xl ring-1 ring-slate-200">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Recent corporate activity</p>
+                    <p className="mt-2 text-slate-600">Search and review corporate bookings in real time.</p>
                   </div>
-                ) : (
-                  filteredClientOrders.slice(-5).map((order) => (
-                    <div key={order.id} className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-                      <p className="font-semibold text-slate-900">{order.id}</p>
-                      <p className="text-sm text-slate-600">{order.route} · {order.status}</p>
+                  <input
+                    type="search"
+                    value={clientOrderSearch}
+                    onChange={(e) => setClientOrderSearch(e.target.value)}
+                    placeholder="Search bookings..."
+                    className="w-full rounded-3xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 sm:w-80"
+                    aria-label="Search corporate bookings"
+                  />
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {filteredClientOrders.length === 0 ? (
+                    <div className="rounded-3xl bg-white p-4 text-slate-700 shadow-sm ring-1 ring-slate-200">
+                      No corporate bookings matched your search.
                     </div>
-                  ))
-                )}
+                  ) : (
+                    filteredClientOrders.slice(-5).map((order) => (
+                      <div key={order.id} className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+                        <p className="font-semibold text-slate-900">{order.id}</p>
+                        <p className="text-sm text-slate-600">{order.route} · {order.status}</p>
+                        {order.termsAcceptance && <p className="mt-2 text-xs text-slate-500">Delivery terms v{order.termsAcceptance.version} accepted {new Date(order.termsAcceptance.acceptedAt).toLocaleString()}</p>}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Payment history</p>
+                    <h3 className="mt-2 text-xl font-semibold text-slate-900">Recent receipts</h3>
+                  </div>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Live</span>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {paymentHistory.length === 0 ? (
+                    <div className="rounded-3xl bg-slate-50 p-4 text-sm text-slate-600 ring-1 ring-slate-200">
+                      No successful payment receipts yet.
+                    </div>
+                  ) : (
+                    paymentHistory.map((payment) => (
+                      <div key={payment.id} className="rounded-3xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-semibold text-slate-900">{payment.bookingId}</p>
+                          <span className="rounded-full bg-blue-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-blue-700">{payment.method}</span>
+                        </div>
+                        <p className="mt-2 text-sm text-slate-600">{payment.route}</p>
+                        <div className="mt-3 flex items-center justify-between text-sm">
+                          <span className="text-slate-500">Paid</span>
+                          <span className="font-semibold text-slate-900">₦{payment.amount.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1832,6 +2337,7 @@ export default function App() {
                 <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
                   <h3 className="text-xl font-semibold text-slate-900">Client details</h3>
                   <p className="mt-2 text-slate-600">Review booked clients and recent shipment activity at a glance.</p>
+                  <p className="mt-2 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">Email actions open a draft in your configured mail app. Select <strong>hello@sbnldelivery.com</strong> as the sender; attach the downloaded invoice before sending.</p>
                   <div className="mt-6 space-y-4">
                     {orders.length === 0 ? (
                       <div className="rounded-3xl bg-slate-50 p-4 text-slate-600">No client bookings are available yet.</div>
@@ -1847,6 +2353,28 @@ export default function App() {
                           </div>
                           <p className="mt-2 text-sm text-slate-600">Assigned to: {order.assignedTo || "Unassigned"}</p>
                           <p className="text-sm text-slate-600">Contact: {order.contact || "Not provided"}</p>
+                          {order.customerEmail && <p className="text-sm text-slate-600">Email: {order.customerEmail}</p>}
+                          {order.itemDescription && <p className="text-sm text-slate-600">Cargo: {order.itemDescription} · Qty {order.quantity}</p>}
+                          {order.quoteDraftedAt && <p className="mt-2 text-xs text-slate-500">Quote email draft prepared {new Date(order.quoteDraftedAt).toLocaleString()}</p>}
+                          {order.quoteConfirmedAt && <p className="text-xs font-medium text-emerald-700">CONFIRM received · Invoice {order.invoiceNumber}</p>}
+                          {order.invoiceDraftedAt && <p className="text-xs text-slate-500">Invoice email draft prepared {new Date(order.invoiceDraftedAt).toLocaleString()}</p>}
+                          {order.paymentConfirmedAt && <p className="text-xs font-medium text-emerald-700">Transfer verified {new Date(order.paymentConfirmedAt).toLocaleString()}</p>}
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {order.customerEmail && !order.quoteConfirmedAt && (
+                              <>
+                                <button type="button" onClick={() => prepareQuoteEmail(order)} className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800">Prepare quote email</button>
+                                {order.quoteDraftedAt && <button type="button" onClick={() => recordQuoteConfirmation(order)} className="rounded-lg border border-emerald-300 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50">Record CONFIRM received</button>}
+                              </>
+                            )}
+                            {order.quoteConfirmedAt && (
+                              <>
+                                <button type="button" onClick={() => downloadInvoiceDocument(order)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white">Download invoice to attach</button>
+                                <button type="button" onClick={() => prepareInvoiceEmail(order)} className="rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800">Prepare invoice email</button>
+                              </>
+                            )}
+                            {order.paymentStatus === "Awaiting Transfer" && <button type="button" onClick={() => confirmTransferReceived(order)} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800">Verify transfer received</button>}
+                          </div>
+                          {order.quoteConfirmedAt && <p className="mt-2 text-xs text-slate-500">Attach the downloaded invoice file to the email draft before sending.</p>}
                         </div>
                       ))
                     )}
@@ -2465,7 +2993,7 @@ export default function App() {
                   <h3 className="text-xl font-semibold text-slate-900">Cooperate Panel</h3>
                   <p className="mt-2 text-slate-600">Tools and views tailored to your assigned shipments.</p>
                   <div className="mt-4">
-                    <Cooperate orders={visibleOrders} booking={booking} setBooking={setBooking} handleBook={handleBook} />
+                    <Cooperate orders={visibleOrders} booking={booking} setBooking={setBooking} handleBook={handleBook} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onViewTerms={() => navigateTo("terms")} />
                   </div>
                 </div>
               </div>

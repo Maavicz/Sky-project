@@ -19,6 +19,14 @@ describe('validateBooking', () => {
   });
 
   it('accepts valid booking', () => {
-    expect(validateBooking({ name: 'Ada Okafor', pickup: 'PHC', delivery: 'LOS', weight: '2.5', contact: '08012345678' })).toEqual({ ok: true });
+    expect(validateBooking({ name: 'Ada Okafor', email: 'ada@example.com', receiverName: 'Tunde Bello', receiverContact: '08087654321', itemDescription: 'Documents', quantity: '1', pickup: 'PHC', delivery: 'LOS', service: 'Sensitive - Next Day', collectionPoint: 'Lagos WareHub', weight: '2.5', contact: '08012345678' })).toEqual({ ok: true });
+  });
+
+  it('requires a valid customer email', () => {
+    expect(validateBooking({ name: 'Ada Okafor', email: 'not-an-email', receiverName: 'Tunde Bello', receiverContact: '08087654321', itemDescription: 'Documents', quantity: '1', pickup: 'PHC', delivery: 'LOS', service: 'Sensitive - Next Day', collectionPoint: 'Lagos WareHub', weight: '2.5', contact: '08012345678' })).toEqual({ ok: false });
+  });
+
+  it('requires receiver and cargo details', () => {
+    expect(validateBooking({ name: 'Ada Okafor', pickup: 'PHC', delivery: 'LOS', weight: '2.5', contact: '08012345678' })).toEqual({ ok: false });
   });
 });

@@ -2,6 +2,11 @@ export function computeNewId(currentCount) {
   return `SB-2026-${String(currentCount + 1).padStart(3, '0')}`;
 }
 
+export function canAccessTracking(role = "guest") {
+  const normalizedRole = String(role ?? "guest").trim().toLowerCase();
+  return ["client", "admin", "subadmin"].includes(normalizedRole);
+}
+
 export function getFutureFlightSchedulePreview(daysWindow = 14) {
   const flightTemplate = [
     { id: "AP-204", airline: "Air Peace", route: "PHC → LOS", region: "Local" },

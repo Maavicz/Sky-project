@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { FaTruckMoving, FaHistory, FaSearch, FaPaperPlane, FaStream } from "react-icons/fa";
 
-export default function Cooperate({ orders = [], booking = {}, setBooking = () => {}, handleBook = () => {} }) {
+export default function Cooperate({ orders = [], booking = {}, setBooking = () => {}, handleBook = () => {}, termsAccepted = false, setTermsAccepted = () => {}, onViewTerms = () => {} }) {
   const [tab, setTab] = useState("delivery");
   const [selectedOrderId, setSelectedOrderId] = useState(orders?.[0]?.id || "");
 
@@ -100,15 +100,26 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
             <div>
               <h3 className="text-lg font-semibold">Quick Booking</h3>
               <p className="mt-2 text-sm text-slate-600">Create a booking for the cooperative workflow.</p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <input value={booking.name || ""} onChange={(e)=>setBooking({...booking,name:e.target.value})} className="rounded-md border p-2" placeholder="Customer name" />
-                <input value={booking.pickup} onChange={(e)=>setBooking({...booking,pickup:e.target.value})} className="rounded-md border p-2" placeholder="Pickup" />
-                <input value={booking.delivery} onChange={(e)=>setBooking({...booking,delivery:e.target.value})} className="rounded-md border p-2" placeholder="Delivery" />
-                <input value={booking.weight} onChange={(e)=>setBooking({...booking,weight:e.target.value})} className="rounded-md border p-2" placeholder="Weight (kg)" />
-                <input value={booking.contact} onChange={(e)=>setBooking({...booking,contact:e.target.value})} className="rounded-md border p-2" placeholder="Contact" />
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <input value={booking.name || ""} onChange={(e)=>setBooking({...booking,name:e.target.value})} className="rounded-xl border p-3" placeholder="Customer name" aria-label="Customer name" />
+                <input type="email" value={booking.email || ""} onChange={(e)=>setBooking({...booking,email:e.target.value})} className="rounded-xl border p-3" placeholder="Customer email" aria-label="Customer email" />
+                <input value={booking.contact || ""} onChange={(e)=>setBooking({...booking,contact:e.target.value})} className="rounded-xl border p-3" placeholder="Sender contact" aria-label="Sender contact" />
+                <input value={booking.receiverName || ""} onChange={(e)=>setBooking({...booking,receiverName:e.target.value})} className="rounded-xl border p-3" placeholder="Receiver name" aria-label="Receiver name" />
+                <input value={booking.receiverContact || ""} onChange={(e)=>setBooking({...booking,receiverContact:e.target.value})} className="rounded-xl border p-3" placeholder="Receiver contact" aria-label="Receiver contact" />
+                <input value={booking.itemDescription || ""} onChange={(e)=>setBooking({...booking,itemDescription:e.target.value})} className="rounded-xl border p-3" placeholder="Cargo description" aria-label="Cargo description" />
+                <input type="number" min="1" step="1" value={booking.quantity || "1"} onChange={(e)=>setBooking({...booking,quantity:e.target.value})} className="rounded-xl border p-3" placeholder="Quantity" aria-label="Quantity" />
+                <input value={booking.weight || ""} onChange={(e)=>setBooking({...booking,weight:e.target.value})} className="rounded-xl border p-3" placeholder="Weight (kg)" aria-label="Weight" />
+                <select value={booking.pickup || ""} onChange={(e)=>setBooking({...booking,pickup:e.target.value})} className="rounded-xl border p-3" aria-label="Pickup location"><option value="">Pickup location</option><option value="PHC">Port Harcourt</option><option value="LOS">Lagos</option><option value="ABJ">Abuja</option></select>
+                <select value={booking.delivery || ""} onChange={(e)=>setBooking({...booking,delivery:e.target.value})} className="rounded-xl border p-3" aria-label="Delivery location"><option value="">Delivery location</option><option value="PHC">Port Harcourt</option><option value="LOS">Lagos</option><option value="ABJ">Abuja</option></select>
+                <select value={booking.service || "Sensitive - Next Day"} onChange={(e)=>setBooking({...booking,service:e.target.value})} className="rounded-xl border p-3" aria-label="Service"><option>Sensitive - Next Day</option><option>Next Day</option><option>Same Day</option></select>
+                <select value={booking.collectionPoint || ""} onChange={(e)=>setBooking({...booking,collectionPoint:e.target.value})} className="rounded-xl border p-3" aria-label="WareHub collection point"><option value="">WareHub collection point</option><option>Port Harcourt WareHub</option><option>Lagos WareHub</option><option>Abuja WareHub</option></select>
+              </div>
+              <div className="mt-4 flex items-start gap-3 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                <input id="cooperate-booking-terms" type="checkbox" checked={termsAccepted} onChange={(event)=>setTermsAccepted(event.target.checked)} className="mt-1 h-4 w-4 accent-blue-700" />
+                <div><label htmlFor="cooperate-booking-terms">Customer confirms agreement to the delivery terms.</label> <button type="button" onClick={onViewTerms} className="font-semibold text-blue-700 underline">Read terms</button></div>
               </div>
               <div className="mt-3">
-                <button onClick={handleBook} className="rounded-md bg-blue-600 px-4 py-2 text-white">Submit booking</button>
+                <button onClick={handleBook} className="rounded-xl bg-blue-700 px-4 py-3 text-white">Submit booking</button>
               </div>
             </div>
           )}
