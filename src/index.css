@@ -14,6 +14,102 @@ body {
   min-height: 100vh;
 }
 
+.client-portal-theme--dark {
+  min-height: calc(100vh - 7rem);
+  border-radius: 1.5rem;
+  background: #10191e;
+  padding: 1rem;
+  color: #e7eeec;
+  color-scheme: dark;
+}
+
+.client-portal-theme--dark .bg-white {
+  background-color: #18252b;
+}
+
+.client-portal-theme--dark .bg-slate-50 {
+  background-color: #1d2c32;
+}
+
+.client-portal-theme--dark .bg-slate-100 {
+  background-color: #293940;
+}
+
+.client-portal-theme--dark .bg-blue-50 {
+  background-color: #183047;
+}
+
+.client-portal-theme--dark .bg-blue-100 {
+  background-color: #24435c;
+}
+
+.client-portal-theme--dark .bg-emerald-50 {
+  background-color: #17372f;
+}
+
+.client-portal-theme--dark .bg-amber-50 {
+  background-color: #3b3020;
+}
+
+.client-portal-theme--dark .text-slate-900,
+.client-portal-theme--dark .text-slate-800 {
+  color: #edf3f1;
+}
+
+.client-portal-theme--dark .text-slate-700,
+.client-portal-theme--dark .text-slate-600 {
+  color: #bdc9c9;
+}
+
+.client-portal-theme--dark .text-slate-500 {
+  color: #9aa9ad;
+}
+
+.client-portal-theme--dark .text-blue-700 {
+  color: #8ec5ff;
+}
+
+.client-portal-theme--dark .text-blue-900 {
+  color: #d6eaff;
+}
+
+.client-portal-theme--dark .text-emerald-800,
+.client-portal-theme--dark .text-emerald-900 {
+  color: #a7e6c9;
+}
+
+.client-portal-theme--dark .text-amber-900 {
+  color: #f3d79e;
+}
+
+.client-portal-theme--dark .border-slate-200,
+.client-portal-theme--dark .border-slate-300 {
+  border-color: #3a4b51;
+}
+
+.client-portal-theme--dark .ring-slate-200 {
+  --tw-ring-color: #3a4b51;
+}
+
+.client-portal-theme--dark input,
+.client-portal-theme--dark select,
+.client-portal-theme--dark textarea {
+  border-color: #40535a;
+  background-color: #1d2c32;
+  color: #edf3f1;
+}
+
+.client-portal-theme--dark input::placeholder,
+.client-portal-theme--dark textarea::placeholder {
+  color: #9aa9ad;
+}
+
+.client-portal-theme--dark input:focus,
+.client-portal-theme--dark select:focus,
+.client-portal-theme--dark textarea:focus {
+  border-color: #60a5fa;
+}
+
 /* Toast animations */
 .toast-enter {
   transform: translateY(-8px) scale(0.98);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { buildBookingTermsAcceptance, validateBooking, buildPaymentSummary, getPaymentOptions } from "./testHelpers/validation.mjs";
 import { buildInvoiceEmail, buildInvoiceHtml, buildInvoiceNumber, buildMailtoUrl, buildQuoteEmail, DELIVERY_COLLECTION_OPTIONS, formatNaira, SBNL_PAYMENT_ACCOUNT } from "./testHelpers/emailTemplates.mjs";
-import { canAccessTracking, getAdminTabs, getFutureFlightSchedulePreview } from "./testHelpers/appLogic.mjs";
+import { appendShipmentEvent, canAccessTracking, ensureShipmentAudit, getAdminTabs, getFutureFlightSchedulePreview, verifyShipmentHandoffPin } from "./testHelpers/appLogic.mjs";
 import {
   FaBell,
   FaBoxOpen,
@@ -27,6 +27,9 @@ import {
   FaWarehouse,
   FaMapMarkerAlt,
   FaLinkedinIn,
+  FaMoon,
+  FaSun,
+  FaCog,
 } from "react-icons/fa";
 import heroImage from "../imagery/happy-new-month.png";
 import Field from "./components/Field.jsx";
@@ -37,6 +40,9 @@ import TrackSection from "./components/TrackSection.jsx";
 import AlertsPanel from "./components/AlertsPanel.jsx";
 import Cooperate from "./Cooperate.jsx";
 import DeliveryTerms, { DELIVERY_TERMS_VERSION } from "./components/DeliveryTerms.jsx";
+import ShipmentAudit from "./components/ShipmentAudit.jsx";
+import ShipmentPreview from "./components/ShipmentPreview.jsx";
+import AdminSettings from "./components/AdminSettings.jsx";
 
 const services = [
   {
@@ -132,6 +138,14 @@ const initialTasks = [
   { id: "TSK-003", shipment: "SB-2026-003", task: "Schedule forwarding", assignee: "Team C", status: "Open" },
 ];
 
+const defaultAdminSettings = {
+  notifications: { shipments: true, payments: true, security: true },
+  backgroundColor: "mist",
+  schedule: { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], start: "08:00", end: "17:00", timezone: "Africa/Lagos" },
+  profile: { name: "", email: "", phone: "" },
+  handoffPin: "",
+};
+
 export default function App() {
   const [page, setPage] = useState("home");
   const [role, setRole] = useState("guest");
@@ -141,6 +155,23 @@ export default function App() {
   const [trackingResult, setTrackingResult] = useState("");
   const [tasks, setTasks] = useState(initialTasks);
   const [accounts, setAccounts] = useState(initialAccounts);
+  const [adminSettings, setAdminSettings] = useState(() => {
+    try {
+      const storedSettings = JSON.parse(localStorage.getItem("sb_admin_settings_v1") || "null");
+      if (!storedSettings) return defaultAdminSettings;
+      return {
+        ...defaultAdminSettings,
+        ...storedSettings,
+        notifications: { ...defaultAdminSettings.notifications, ...storedSettings.notifications },
+        schedule: { ...defaultAdminSettings.schedule, ...storedSettings.schedule },
+        profile: { ...defaultAdminSettings.profile, ...storedSettings.profile },
+      };
+    } catch {
+      return defaultAdminSettings;
+    }
+  });
+  const [handoffAction, setHandoffAction] = useState(null);
+  const [handoffPinInput, setHandoffPinInput] = useState("");
   const [subadminProfiles, setSubadminProfiles] = useState([]);
   const [activeUser, setActiveUser] = useState("");
   const [userSearch, setUserSearch] = useState("");
@@ -211,18 +242,40 @@ export default function App() {
   });
   const [clientNotice, setClientNotice] = useState("");
   const [showClientRegistration, setShowClientRegistration] = useState(false);
+  const [clientTheme, setClientTheme] = useState(() => {
+    try {
+      return localStorage.getItem("sb_client_theme_v1") === "dark" ? "dark" : "light";
+    } catch {
+      return "light";
+    }
+  });
 
-  const [orders, setOrders] = useState([
-    { id: "SB-2026-001", status: "In Flight", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Paid", cargoStage: "In transit", airportStatus: "Cleared", flagged: false },
-    { id: "SB-2026-002", status: "Delivered", route: "PH → Abuja", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Paid", cargoStage: "Delivered", airportStatus: "Completed", flagged: false },
-    { id: "SB-2026-003", status: "At Airport", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Pending", cargoStage: "Airport processing", airportStatus: "Awaiting clearance", flagged: false },
-  ]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("sb_client_theme_v1", clientTheme);
+    } catch {}
+  }, [clientTheme]);
+
+  const [orders, setOrders] = useState(() => {
+    const initializedAt = new Date().toISOString();
+    return [
+      { id: "SB-2026-001", status: "In Flight", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Paid", cargoStage: "In transit", airportStatus: "Cleared", flagged: false },
+      { id: "SB-2026-002", status: "Delivered", route: "PH → Abuja", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Paid", cargoStage: "Delivered", airportStatus: "Completed", flagged: false },
+      { id: "SB-2026-003", status: "At Airport", route: "PH → Lagos", assignedTo: "Unassigned", pendingApproval: false, paymentStatus: "Pending", cargoStage: "Airport processing", airportStatus: "Awaiting clearance", flagged: false },
+    ].map((order) => ({
+      ...order,
+      createdAt: initializedAt,
+      updatedAt: initializedAt,
+      history: [{ at: initializedAt, actor: "system", event: "Demo shipment initialized" }],
+    }));
+  });
 
   // Persist key names
   const STORAGE_KEYS = {
     accounts: "sb_accounts_v1",
     orders: "sb_orders_v1",
     subadmins: "sb_subadmins_v1",
+    adminSettings: "sb_admin_settings_v1",
   };
 
   // Load persisted state on mount
@@ -232,7 +285,10 @@ export default function App() {
       const persistedOrders = localStorage.getItem(STORAGE_KEYS.orders);
       const persistedSubadmins = localStorage.getItem(STORAGE_KEYS.subadmins);
       if (persistedAccounts) setAccounts(JSON.parse(persistedAccounts));
-      if (persistedOrders) setOrders(JSON.parse(persistedOrders));
+      if (persistedOrders) {
+        const importedAt = new Date().toISOString();
+        setOrders(JSON.parse(persistedOrders).map((order) => ensureShipmentAudit(order, importedAt)));
+      }
       if (persistedSubadmins) setSubadminProfiles(JSON.parse(persistedSubadmins));
     } catch (e) {
       console.warn("Failed to load persisted state:", e);
@@ -257,6 +313,12 @@ export default function App() {
       localStorage.setItem(STORAGE_KEYS.subadmins, JSON.stringify(subadminProfiles));
     } catch {}
   }, [subadminProfiles]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.adminSettings, JSON.stringify(adminSettings));
+    } catch {}
+  }, [adminSettings]);
 
   // Performance: memoize derived lists
   const memoActiveSubadmins = useMemo(() => subadminProfiles.filter((p) => p.status === "Active"), [subadminProfiles]);
@@ -366,6 +428,25 @@ export default function App() {
     setLogin({ user: "", pass: "" });
   };
 
+  const updateAdminSettings = (changes) => {
+    setAdminSettings((previous) => ({
+      ...previous,
+      ...changes,
+      notifications: changes.notifications || previous.notifications,
+      schedule: changes.schedule || previous.schedule,
+      profile: changes.profile || previous.profile,
+    }));
+  };
+
+  const changeAdminPassword = (currentPassword, nextPassword, confirmedPassword) => {
+    const account = accounts[activeUser];
+    if (!account || account.password !== currentPassword) return { ok: false, message: "Current password is incorrect." };
+    if (String(nextPassword).length < 8) return { ok: false, message: "New password must be at least 8 characters." };
+    if (nextPassword !== confirmedPassword) return { ok: false, message: "New password and confirmation do not match." };
+    setAccounts((previous) => ({ ...previous, [activeUser]: { ...previous[activeUser], password: nextPassword } }));
+    return { ok: true, message: "Password changed for this local demo account." };
+  };
+
   // Simple client-side auth guard helper
   const requireRole = (allowedRoles) => {
     if (!Array.isArray(allowedRoles)) allowedRoles = [allowedRoles];
@@ -403,6 +484,7 @@ export default function App() {
   };
 
   const createNotification = (notification) => {
+    if (notification.category && adminSettings.notifications[notification.category] === false) return;
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     setNotifications((prev) => [{ id, ...notification }, ...prev].slice(0, 5));
   };
@@ -428,6 +510,11 @@ export default function App() {
         setTrackingResult(`${found.status} — ${found.route}`);
         setTrackingDetails({
           orderId: found.id,
+          id: found.id,
+          shipment: found,
+          createdAt: found.createdAt,
+          updatedAt: found.updatedAt,
+          history: found.history,
           status: found.status,
           route: found.route,
           currentLocation:
@@ -451,6 +538,14 @@ export default function App() {
     }, 250);
   };
 
+  const recordShipmentUpdate = (orderId, changes, event, actor = activeUser || (role === "guest" ? "customer" : role), at = new Date().toISOString()) => {
+    setOrders((previous) => previous.map((order) => order.id === orderId
+      ? appendShipmentEvent(order, changes, event, { actor, at })
+      : order));
+    const category = /payment|transfer/i.test(event) ? "payments" : "shipments";
+    createNotification({ category, title: "Shipment activity", message: `${orderId}: ${event}`, type: "info" });
+  };
+
   const getOrderEmailDetails = (order) => {
     const [pickupCode, deliveryCode] = String(order.route || "").split(" → ");
     const locationNames = { PHC: "Port Harcourt", LOS: "Lagos", ABJ: "Abuja" };
@@ -472,15 +567,18 @@ export default function App() {
       return;
     }
     const template = buildQuoteEmail(getOrderEmailDetails(order));
-    setOrders((previous) => previous.map((item) => item.id === order.id ? { ...item, quoteDraftedAt: new Date().toISOString() } : item));
+    recordShipmentUpdate(order.id, { quoteDraftedAt: new Date().toISOString() }, "Quote email draft prepared", activeUser || "admin");
     window.location.href = buildMailtoUrl(template);
   };
 
   const recordQuoteConfirmation = (order) => {
     const todaySequence = orders.filter((item) => item.createdAt?.slice(0, 10) === new Date().toISOString().slice(0, 10)).length + 1;
-    setOrders((previous) => previous.map((item) => item.id === order.id
-      ? { ...item, quoteConfirmedAt: new Date().toISOString(), quoteConfirmedBy: activeUser, invoiceNumber: item.invoiceNumber || buildInvoiceNumber(new Date(), todaySequence) }
-      : item));
+    const confirmedAt = new Date().toISOString();
+    recordShipmentUpdate(order.id, {
+      quoteConfirmedAt: confirmedAt,
+      quoteConfirmedBy: activeUser,
+      invoiceNumber: order.invoiceNumber || buildInvoiceNumber(new Date(), todaySequence),
+    }, "Customer confirmed quote", activeUser || "admin", confirmedAt);
     pushToast({ type: "success", message: `CONFIRM recorded for ${order.id}. The invoice draft is ready.` });
   };
 
@@ -491,7 +589,7 @@ export default function App() {
     }
     const details = getOrderEmailDetails(order);
     const template = buildInvoiceEmail({ ...details, service: details.service.split(" - ")[0], invoiceNumber: order.invoiceNumber });
-    setOrders((previous) => previous.map((item) => item.id === order.id ? { ...item, invoiceDraftedAt: new Date().toISOString() } : item));
+    recordShipmentUpdate(order.id, { invoiceDraftedAt: new Date().toISOString() }, "Invoice email draft prepared", activeUser || "admin");
     window.location.href = buildMailtoUrl(template);
   };
 
@@ -508,14 +606,20 @@ export default function App() {
     downloadLink.href = fileUrl;
     downloadLink.download = `${order.invoiceNumber}.html`;
     downloadLink.click();
+    recordShipmentUpdate(order.id, { invoiceDownloadedAt: new Date().toISOString() }, "Invoice document downloaded", activeUser || "admin");
     setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
   };
 
   const confirmTransferReceived = (order) => {
     const verifiedRider = activeSubadminProfiles.find((profile) => profile.role?.toLowerCase().includes("rider"));
-    setOrders((previous) => previous.map((item) => item.id === order.id
-      ? { ...item, paymentStatus: "Paid", status: verifiedRider ? "In Flight" : "Awaiting Rider Assignment", cargoStage: verifiedRider ? "Airport processing" : "Payment verified", assignedTo: verifiedRider?.username || item.assignedTo || "Unassigned", paymentConfirmedAt: new Date().toISOString() }
-      : item));
+    const paymentConfirmedAt = new Date().toISOString();
+    recordShipmentUpdate(order.id, {
+      paymentStatus: "Paid",
+      status: verifiedRider ? "In Flight" : "Awaiting Rider Assignment",
+      cargoStage: verifiedRider ? "Airport processing" : "Payment verified",
+      assignedTo: verifiedRider?.username || order.assignedTo || "Unassigned",
+      paymentConfirmedAt,
+    }, "Bank transfer verified", activeUser || role, paymentConfirmedAt);
     pushToast({ type: "success", message: verifiedRider ? `Payment verified and ${verifiedRider.fullName} assigned to ${order.id}.` : `Payment verified for ${order.id}; no active rider profile is available to assign.` });
   };
 
@@ -548,6 +652,7 @@ export default function App() {
 
     const newId = `SB-2026-${String(orders.length + 1).padStart(3, '0')}`;
     const autoAssignedTo = memoActiveSubadmins[0]?.username || "Unassigned";
+    const createdAt = new Date().toISOString();
     const newOrder = {
       id: newId,
       status: "Pending",
@@ -568,7 +673,10 @@ export default function App() {
       collectionPoint: booking.collectionPoint,
       quoteAmount: buildPaymentSummary({ bookingId: newId, route: `${booking.pickup} → ${booking.delivery}`, weight: booking.weight }).total,
       termsAcceptance,
-      createdAt: new Date().toISOString(),
+      createdAt,
+      updatedAt: createdAt,
+      statusUpdatedAt: createdAt,
+      history: [{ at: createdAt, actor: activeUser || booking.name.trim(), event: "Booking created" }],
     };
 
     setOrders((prev) => [newOrder, ...prev]);
@@ -594,9 +702,7 @@ export default function App() {
 
     const currentBooking = orders.find((order) => order.id === recentBookingId) || null;
     if (paymentMethod === "Bank Transfer") {
-      setOrders((previous) => previous.map((order) => order.id === recentBookingId
-        ? { ...order, paymentStatus: "Awaiting Transfer", status: "Pending Payment" }
-        : order));
+      recordShipmentUpdate(recentBookingId, { paymentStatus: "Awaiting Transfer", status: "Pending Payment" }, "Customer reported bank transfer; awaiting verification");
       setPaymentStage(false);
       pushToast({ type: "info", message: "Transfer instructions confirmed. Shipment remains pending until SBNL verifies payment." });
       return;
@@ -608,13 +714,7 @@ export default function App() {
       paymentMethod,
     });
 
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === recentBookingId
-          ? { ...order, paymentStatus: "Paid", status: "In Flight", cargoStage: "Airport processing" }
-          : order
-      )
-    );
+    recordShipmentUpdate(recentBookingId, { paymentStatus: "Paid", status: "In Flight", cargoStage: "Airport processing" }, "Payment confirmed");
     setPaymentHistory((prev) => [
       {
         id: `PAY-${Date.now()}`,
@@ -630,6 +730,7 @@ export default function App() {
       title: "Payment confirmed",
       message: `Payment for booking ${recentBookingId} was confirmed. Shipment is now in transit.`,
       type: "success",
+      category: "payments",
     });
     setPaymentStage(false);
     setTrackingResult("In Flight — processing at airport");
@@ -694,19 +795,12 @@ export default function App() {
   const paymentOptions = getPaymentOptions();
 
   const updateStatus = (id, newStatus) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o))
-    );
+    recordShipmentUpdate(id, { status: newStatus }, `Status changed to ${newStatus}`);
   };
 
   const assignOrderToSubadmin = (id, targetUsername) => {
-    setOrders((prev) =>
-      prev.map((order) => {
-        if (order.id !== id) return order;
-        const nextAssignedTo = targetUsername && targetUsername !== "Unassigned" ? targetUsername : "Unassigned";
-        return { ...order, assignedTo: nextAssignedTo, pendingApproval: false, pendingForwardTo: "" };
-      })
-    );
+    const nextAssignedTo = targetUsername && targetUsername !== "Unassigned" ? targetUsername : "Unassigned";
+    recordShipmentUpdate(id, { assignedTo: nextAssignedTo, pendingApproval: false, pendingForwardTo: "" }, `Shipment assigned to ${nextAssignedTo}`);
     const selectedProfile = subadminProfiles.find((profile) => profile.username === targetUsername);
     setProfileNotice(selectedProfile ? `Shipment ${id} assigned to ${selectedProfile.fullName}` : `Shipment ${id} assignment updated`);
   };
@@ -716,49 +810,50 @@ export default function App() {
       setProfileNotice("Choose a sub-admin before forwarding.");
       return;
     }
-    setOrders((prev) =>
-      prev.map((order) => {
-        if (order.id !== id) return order;
-        return {
-          ...order,
-          pendingApproval: true,
-          pendingForwardTo: targetUsername,
-        };
-      })
-    );
+    recordShipmentUpdate(id, { pendingApproval: true, pendingForwardTo: targetUsername }, `Shipment forwarding requested for ${targetUsername}`);
     const selectedProfile = subadminProfiles.find((profile) => profile.username === targetUsername);
     setProfileNotice(selectedProfile ? `Shipment ${id} forwarded to ${selectedProfile.fullName} for approval.` : `Shipment ${id} forwarding requested.`);
   };
 
   const approveShipmentAssignment = (id) => {
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === id
-          ? {
-              ...order,
-              assignedTo: order.pendingForwardTo || order.assignedTo,
-              pendingForwardTo: "",
-              pendingApproval: false,
-            }
-          : order
-      )
-    );
+    const order = orders.find((item) => item.id === id);
+    if (!order) return;
+    const nextAssignedTo = order.pendingForwardTo || order.assignedTo;
+    recordShipmentUpdate(id, { assignedTo: nextAssignedTo, pendingForwardTo: "", pendingApproval: false }, `Shipment handoff approved to ${nextAssignedTo}`);
     setProfileNotice(`Shipment ${id} approved for handoff.`);
   };
 
   const declineShipmentAssignment = (id) => {
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === id
-          ? {
-              ...order,
-              pendingForwardTo: "",
-              pendingApproval: false,
-            }
-          : order
-      )
-    );
+    recordShipmentUpdate(id, { pendingForwardTo: "", pendingApproval: false }, "Shipment handoff declined");
     setProfileNotice(`Shipment ${id} forwarding declined and returned to current assignee.`);
+  };
+
+  const requestHandoffConfirmation = (action) => {
+    if (!adminSettings.handoffPin) {
+      pushToast({ type: "error", message: "An administrator must set the shipment handoff PIN in Settings first." });
+      if (role === "admin") setAdminTab("settings");
+      return;
+    }
+    setHandoffAction(action);
+    setHandoffPinInput("");
+  };
+
+  const confirmHandoffAction = (event) => {
+    event.preventDefault();
+    if (!verifyShipmentHandoffPin(adminSettings.handoffPin, handoffPinInput)) {
+      pushToast({ type: "error", message: "Handoff PIN is incorrect. The shipment was not changed." });
+      createFraudAlert(handoffAction?.shipmentId, `Incorrect handoff PIN entered by ${activeUser || role}.`);
+      createNotification({ category: "security", title: "Handoff PIN rejected", message: `A shipment handoff PIN check failed for ${handoffAction?.shipmentId}.`, type: "error" });
+      setHandoffPinInput("");
+      return;
+    }
+
+    const action = handoffAction;
+    setHandoffAction(null);
+    setHandoffPinInput("");
+    if (action?.type === "approve") approveShipmentAssignment(action.shipmentId);
+    if (action?.type === "forward") forwardShipment(action.shipmentId, action.targetUsername);
+    if (action?.type === "assign") assignOrderToSubadmin(action.shipmentId, action.targetUsername);
   };
 
   // Auto-assign logic: assign unassigned orders to active subadmin profiles
@@ -774,7 +869,8 @@ export default function App() {
         if (!o.assignedTo || o.assignedTo === "Unassigned") {
           const assignTo = available[idx % available.length];
           idx += 1;
-          return { ...o, assignedTo: assignTo, pendingApproval: false };
+          const at = new Date().toISOString();
+          return appendShipmentEvent(o, { assignedTo: assignTo, pendingApproval: false }, `Auto-assigned to ${assignTo}`, { actor: activeUser || role, at });
         }
         return o;
       })
@@ -1117,7 +1213,7 @@ export default function App() {
   const locationOptions = ["Lagos", "Abuja", "Port Harcourt"];
 
   return (
-    <div className="min-h-screen bg-[#f5f8ff] text-slate-900">
+    <div className="min-h-screen bg-[#f5f8ff] text-slate-900" style={page === "admin" && role === "admin" ? { backgroundColor: { mist: "#f5f8ff", white: "#ffffff", "cool-gray": "#e8edf1" }[adminSettings.backgroundColor] || "#f5f8ff" } : undefined}>
       <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
@@ -1473,6 +1569,20 @@ export default function App() {
           </>
         )}
         <Toasts toasts={toasts} />
+
+        {handoffAction && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4" role="presentation">
+            <form onSubmit={confirmHandoffAction} role="dialog" aria-modal="true" aria-labelledby="handoff-pin-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-slate-200">
+              <div className="flex items-start justify-between gap-4">
+                <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Staff verification</p><h2 id="handoff-pin-title" className="mt-2 text-xl font-bold text-slate-900">Confirm shipment handoff</h2></div>
+                <button type="button" onClick={() => { setHandoffAction(null); setHandoffPinInput(""); }} aria-label="Close PIN check" className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">Close</button>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-600">Enter the handoff PIN to {handoffAction.type === "approve" ? "approve" : "send"} shipment <strong>{handoffAction.shipmentId}</strong>{handoffAction.targetUsername ? ` to ${getSubadminLabel(handoffAction.targetUsername)}` : ""}.</p>
+              <label className="mt-5 block text-sm font-semibold text-slate-700">Handoff PIN<input type="password" inputMode="numeric" autoComplete="current-password" value={handoffPinInput} onChange={(event) => setHandoffPinInput(event.target.value.replace(/\D/g, "").slice(0, 8))} autoFocus className="mt-2 min-h-12 w-full rounded-xl border border-slate-300 px-4 text-lg tracking-[0.3em] focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-200" /></label>
+              <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => { setHandoffAction(null); setHandoffPinInput(""); }} className="min-h-11 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button><button type="submit" className="min-h-11 rounded-lg bg-blue-700 px-4 text-sm font-semibold text-white hover:bg-blue-800">Verify &amp; continue</button></div>
+            </form>
+          </div>
+        )}
         
         
 
@@ -1888,13 +1998,27 @@ export default function App() {
         )}
 
         {page === "client" && role === "client" && (
-          <div className="space-y-8">
+          <div className={`client-portal-theme space-y-8 ${clientTheme === "dark" ? "client-portal-theme--dark" : ""}`}>
             <div className="rounded-[2rem] bg-white p-8 shadow-xl ring-1 ring-slate-200">
-              <div className="flex items-center gap-2 text-blue-700">
-                <FaUsers />
-                <h2 className="text-3xl font-semibold text-slate-900">Corporate Client Portal</h2>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-blue-700">
+                    <FaUsers />
+                    <h2 className="text-3xl font-semibold text-slate-900">Corporate Client Portal</h2>
+                  </div>
+                  <p className="mt-2 text-slate-600">Book shipments, track corporate cargo, and view recent activity.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setClientTheme((theme) => theme === "dark" ? "light" : "dark")}
+                  aria-pressed={clientTheme === "dark"}
+                  aria-label={`Switch to ${clientTheme === "dark" ? "light" : "dark"} theme`}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {clientTheme === "dark" ? <FaSun aria-hidden="true" /> : <FaMoon aria-hidden="true" />}
+                  {clientTheme === "dark" ? "Light theme" : "Dark theme"}
+                </button>
               </div>
-              <p className="mt-2 text-slate-600">Book shipments, track corporate cargo, and view recent activity.</p>
             </div>
             <div className="grid gap-6 lg:grid-cols-2">
               <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
@@ -2079,6 +2203,8 @@ export default function App() {
                       <div key={order.id} className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
                         <p className="font-semibold text-slate-900">{order.id}</p>
                         <p className="text-sm text-slate-600">{order.route} · {order.status}</p>
+                            <ShipmentPreview order={order} className="mt-3" />
+                        <ShipmentAudit order={order} />
                         {order.termsAcceptance && <p className="mt-2 text-xs text-slate-500">Delivery terms v{order.termsAcceptance.version} accepted {new Date(order.termsAcceptance.acceptedAt).toLocaleString()}</p>}
                       </div>
                     ))
@@ -2151,6 +2277,7 @@ export default function App() {
                       workflow: FaExchangeAlt,
                       cooperate: FaChartBar,
                       forwarding: FaRoute,
+                      settings: FaCog,
                     };
                     const Icon = iconMap[tab.key] || FaClipboardList;
                     return (
@@ -2328,6 +2455,16 @@ export default function App() {
               </div>
             )}
 
+            {adminTab === "settings" && role === "admin" && (
+              <AdminSettings
+                settings={adminSettings}
+                orders={orders}
+                activeUser={activeUser}
+                onUpdateSettings={updateAdminSettings}
+                onChangePassword={changeAdminPassword}
+              />
+            )}
+
             {adminTab === "client-details" && (
               <div className="grid gap-6 lg:grid-cols-2">
                 <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
@@ -2340,6 +2477,7 @@ export default function App() {
                     ) : (
                       orders.map((order) => (
                         <div key={order.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                          <ShipmentPreview order={order} className="mb-3" />
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <p className="font-semibold text-slate-900">{order.id}</p>
@@ -2351,6 +2489,7 @@ export default function App() {
                           <p className="text-sm text-slate-600">Contact: {order.contact || "Not provided"}</p>
                           {order.customerEmail && <p className="text-sm text-slate-600">Email: {order.customerEmail}</p>}
                           {order.itemDescription && <p className="text-sm text-slate-600">Cargo: {order.itemDescription} · Qty {order.quantity}</p>}
+                          <ShipmentAudit order={order} />
                           {order.quoteDraftedAt && <p className="mt-2 text-xs text-slate-500">Quote email draft prepared {new Date(order.quoteDraftedAt).toLocaleString()}</p>}
                           {order.quoteConfirmedAt && <p className="text-xs font-medium text-emerald-700">CONFIRM received · Invoice {order.invoiceNumber}</p>}
                           {order.invoiceDraftedAt && <p className="text-xs text-slate-500">Invoice email draft prepared {new Date(order.invoiceDraftedAt).toLocaleString()}</p>}
@@ -2383,6 +2522,8 @@ export default function App() {
                       <div key={order.id} className="rounded-3xl bg-slate-50 p-4">
                         <p className="font-semibold text-slate-900">{order.id}</p>
                         <p className="mt-1 text-sm text-slate-600">{order.route} · {order.status}</p>
+                        <ShipmentPreview order={order} className="mt-3" />
+                        <ShipmentAudit order={order} />
                       </div>
                     ))}
                   </div>
@@ -2468,6 +2609,7 @@ export default function App() {
                           <th className="px-4 py-3 text-left font-semibold text-slate-600">Tracking</th>
                           <th className="px-4 py-3 text-left font-semibold text-slate-600">Route</th>
                           <th className="px-4 py-3 text-left font-semibold text-slate-600">Status</th>
+                          <th className="px-4 py-3 text-left font-semibold text-slate-600">Booked / Updated</th>
                           {role === "admin" && <th className="px-4 py-3 text-left font-semibold text-slate-600">Assign</th>}
                           <th className="px-4 py-3 text-left font-semibold text-slate-600">Update</th>
                         </tr>
@@ -2475,21 +2617,22 @@ export default function App() {
                       <tbody className="divide-y divide-slate-200 bg-white">
                         {filteredOrders.length === 0 ? (
                           <tr>
-                            <td colSpan={role === "admin" ? 5 : 4} className="px-4 py-8 text-center text-slate-500">
+                            <td colSpan={role === "admin" ? 6 : 5} className="px-4 py-8 text-center text-slate-500">
                               No bookings matched your search.
                             </td>
                           </tr>
                         ) : (
                           filteredOrders.map((o, i) => (
                             <tr key={i}>
-                              <td className="px-4 py-4 text-slate-900">{o.id}</td>
+                              <td className="px-4 py-4 text-slate-900"><ShipmentPreview order={o} triggerLabel={o.id} className="border-0 bg-transparent px-0 py-0 text-sm text-blue-800 underline underline-offset-2 hover:bg-transparent" /></td>
                               <td className="px-4 py-4 text-slate-900">{o.route}</td>
                               <td className="px-4 py-4 text-slate-900">{o.pendingApproval ? "Pending Approval" : o.status}</td>
+                              <td className="px-4 py-4 text-xs text-slate-600"><p>Booked: {o.createdAt ? new Date(o.createdAt).toLocaleString() : "Unavailable"}</p><p className="mt-1">Updated: {o.updatedAt ? new Date(o.updatedAt).toLocaleString() : "Unavailable"}</p></td>
                               {role === "admin" ? (
                                 <td className="px-4 py-4 text-slate-900">
                                   <select
                                     value={o.assignedTo || "Unassigned"}
-                                    onChange={(e) => assignOrderToSubadmin(o.id, e.target.value)}
+                                    onChange={(e) => requestHandoffConfirmation({ type: "assign", shipmentId: o.id, targetUsername: e.target.value })}
                                     className="w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none"
                                   >
                                     <option value="Unassigned">Unassigned</option>
@@ -2914,6 +3057,8 @@ export default function App() {
                           <div>
                             <p className="font-semibold text-slate-900">{o.id}</p>
                             <p className="text-sm text-slate-600">{o.route}</p>
+                            <ShipmentPreview order={o} className="mt-3" />
+                            <ShipmentAudit order={o} />
                             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Assigned to: {getSubadminLabel(o.assignedTo)}</p>
                             {o.pendingApproval && (
                               <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-amber-600">Pending approval</p>
@@ -2922,7 +3067,7 @@ export default function App() {
                           <div className="flex flex-col gap-2">
                             {role === "subadmin" && o.pendingApproval ? (
                               <button
-                                onClick={() => approveShipmentAssignment(o.id)}
+                                onClick={() => requestHandoffConfirmation({ type: "approve", shipmentId: o.id })}
                                 className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
                               >
                                 Approve
@@ -2949,7 +3094,7 @@ export default function App() {
                             )}
                             {role === "subadmin" && (
                               <button
-                                onClick={() => forwardShipment(o.id, forwardTargets[o.id] || o.assignedTo || "Unassigned")}
+                                onClick={() => requestHandoffConfirmation({ type: "forward", shipmentId: o.id, targetUsername: forwardTargets[o.id] || o.assignedTo || "Unassigned" })}
                                 className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-blue-400 hover:text-blue-700"
                               >
                                 Forward / Push

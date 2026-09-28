@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { FaTruckMoving, FaHistory, FaSearch, FaPaperPlane, FaStream } from "react-icons/fa";
 import { DELIVERY_COLLECTION_OPTIONS } from "./testHelpers/emailTemplates.mjs";
+import ShipmentAudit from "./components/ShipmentAudit.jsx";
+import ShipmentPreview from "./components/ShipmentPreview.jsx";
 
 export default function Cooperate({ orders = [], booking = {}, setBooking = () => {}, handleBook = () => {}, termsAccepted = false, setTermsAccepted = () => {}, onViewTerms = () => {} }) {
   const [tab, setTab] = useState("delivery");
@@ -35,15 +37,19 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
           <h3 className="font-medium">Shipments</h3>
           <div className="mt-3 space-y-2">
             {orders.map((o) => (
-              <button key={o.id} onClick={() => setSelectedOrderId(o.id)} className={`w-full text-left rounded-md px-3 py-2 ${selectedOrderId===o.id?"bg-sky-50 ring-1 ring-sky-200":"hover:bg-slate-50"}`}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold">{o.id}</div>
-                    <div className="text-xs text-slate-500">{o.route || o.createdAt}</div>
+              <div key={o.id} className={`rounded-md px-3 py-2 ${selectedOrderId===o.id?"bg-sky-50 ring-1 ring-sky-200":"hover:bg-slate-50"}`}>
+                <button type="button" onClick={() => setSelectedOrderId(o.id)} className="w-full text-left">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold">{o.id}</div>
+                      <div className="text-xs text-slate-500">{o.route || o.createdAt}</div>
+                      <div className="mt-1 text-[11px] text-slate-500">Updated: {o.updatedAt ? new Date(o.updatedAt).toLocaleString() : "Unavailable"}</div>
+                    </div>
+                    <div className="text-xs text-slate-600">{o.status || o.paymentStatus || 'Unknown'}</div>
                   </div>
-                  <div className="text-xs text-slate-600">{o.status || o.paymentStatus || 'Unknown'}</div>
-                </div>
-              </button>
+                </button>
+                <ShipmentPreview order={o} className="mt-2" />
+              </div>
             ))}
           </div>
         </aside>
@@ -63,6 +69,7 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
                   <p className="mt-1 font-medium">{selectedOrder?.assignedTo || "Unassigned"}</p>
                 </div>
               </div>
+              <ShipmentAudit order={selectedOrder} />
             </div>
           )}
 
@@ -75,6 +82,8 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
                     <div>
                       <div className="font-medium">{o.id}</div>
                       <div className="text-xs text-slate-500">{o.route}</div>
+                      <ShipmentAudit order={o} />
+                      <ShipmentPreview order={o} className="mt-2" />
                     </div>
                     <div className="text-xs text-slate-600">{o.status}</div>
                   </li>
@@ -92,6 +101,7 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
                   <div className="text-sm font-medium">{selectedOrder.id}</div>
                   <div className="text-xs text-slate-500">{selectedOrder.route}</div>
                   <div className="mt-3 text-sm">Status: <span className="font-semibold">{selectedOrder.status}</span></div>
+                  <ShipmentAudit order={selectedOrder} />
                 </div>
               )}
             </div>
@@ -132,6 +142,7 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
 
               {selectedOrder ? (
                 <div className="mt-4 space-y-4">
+                  <ShipmentAudit order={selectedOrder} />
                   <div className="rounded-md border p-4">
                     <div className="text-xs text-slate-500">Pickup (current)</div>
                     <div className="mt-1 font-medium">{new Date(selectedOrder.createdAt || Date.now()).toLocaleString()}</div>

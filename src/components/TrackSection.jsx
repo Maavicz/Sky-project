@@ -1,4 +1,6 @@
 import { FaSearch } from "react-icons/fa";
+import ShipmentAudit from "./ShipmentAudit.jsx";
+import ShipmentPreview from "./ShipmentPreview.jsx";
 
 export default function TrackSection({ trackingInput, setTrackingInput, trackPackage, trackingResult, trackingDetails }) {
   return (
@@ -45,6 +47,8 @@ export default function TrackSection({ trackingInput, setTrackingInput, trackPac
                 </div>
               ))}
             </div>
+            <ShipmentPreview order={trackingDetails.shipment || trackingDetails} className="mt-4" />
+            <ShipmentAudit order={trackingDetails} />
           </div>
         ) : null}
       </div>

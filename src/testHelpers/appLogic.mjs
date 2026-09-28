@@ -7,6 +7,48 @@ export function canAccessTracking(role = "guest") {
   return ["client", "admin", "subadmin"].includes(normalizedRole);
 }
 
+export function verifyShipmentHandoffPin(savedPin, enteredPin) {
+  return /^\d{4,8}$/.test(String(savedPin ?? "")) && String(savedPin) === String(enteredPin ?? "");
+}
+
+export function appendShipmentEvent(order, changes, event, { actor = "system", at = new Date().toISOString() } = {}) {
+  const history = Array.isArray(order.history) ? order.history : [];
+  const statusChanged = Object.hasOwn(changes, "status") && changes.status !== order.status;
+
+  return {
+    ...order,
+    ...changes,
+    updatedAt: at,
+    ...(statusChanged ? { statusUpdatedAt: at } : {}),
+    history: [...history, { at, actor, event }],
+  };
+}
+
+export function ensureShipmentAudit(order, fallbackAt = new Date().toISOString()) {
+  if (Array.isArray(order.history) && order.history.length > 0) {
+    return {
+      ...order,
+      createdAt: order.createdAt ?? null,
+      updatedAt: order.updatedAt || order.history[order.history.length - 1].at || fallbackAt,
+    };
+  }
+
+  const originalTimestamp = order.createdAt || order.updatedAt || null;
+  const recordTimestamp = originalTimestamp || fallbackAt;
+  return {
+    ...order,
+    createdAt: originalTimestamp,
+    updatedAt: order.updatedAt || recordTimestamp,
+    history: [{
+      at: recordTimestamp,
+      actor: "system",
+      event: originalTimestamp
+        ? "Existing shipment migrated to audit history"
+        : "Legacy shipment imported; original booking date unavailable",
+    }],
+  };
+}
+
 export function getFutureFlightSchedulePreview(daysWindow = 14) {
   const flightTemplate = [
     { id: "AP-204", airline: "Air Peace", route: "PHC → LOS", region: "Local" },
@@ -47,6 +89,7 @@ export function getAdminTabs(role = "admin") {
     ...(role === "admin" ? [{ key: "flight-schedules", label: "Flight Schedules" }] : []),
     ...(role === "admin" ? [{ key: "client-details", label: "Client Details" }] : []),
     ...(role === "admin" ? [{ key: "profiles", label: "Sub-admin Profiles" }] : []),
+    ...(role === "admin" ? [{ key: "settings", label: "Settings" }] : []),
     { key: "workflow", label: "Workflow" },
     ...(role === "subadmin" ? [{ key: "cooperate", label: "Cooperate" }] : []),
     { key: "forwarding", label: "Shipment Forwarding" },
