@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildBookingTermsAcceptance, validatePaymentDetails, buildPaymentSummary, getPaymentOptions } from '../src/testHelpers/validation.mjs';
 import { canAccessTracking } from '../src/testHelpers/appLogic.mjs';
-import { buildInvoiceEmail, buildInvoiceHtml, buildInvoiceNumber, buildQuoteEmail } from '../src/testHelpers/emailTemplates.mjs';
+import { buildInvoiceEmail, buildInvoiceHtml, buildInvoiceNumber, buildQuoteEmail, DELIVERY_COLLECTION_OPTIONS } from '../src/testHelpers/emailTemplates.mjs';
 
 describe('validatePaymentDetails', () => {
   it('rejects invalid card details', () => {
@@ -78,12 +78,19 @@ describe('validatePaymentDetails', () => {
       amount: 34500,
       route: 'Port Harcourt to Lagos',
       service: 'Sensitive - Next Day',
-      collectionPoint: 'Lagos WareHub',
+      collectionPoint: 'LMD (Last mile delivery)',
     });
     expect(quote.to).toBe('elishah@example.com');
     expect(quote.body).toContain('Your Skybridge Quote for delivery is: ₦34,500');
     expect(quote.body).toContain('Reply CONFIRM to proceed.');
     expect(quote.body).toContain('Moniepoint 6812806059');
+    expect(quote.body).toContain('Collection: LMD (Last mile delivery)');
+    expect(DELIVERY_COLLECTION_OPTIONS).toEqual(['LMD (Last mile delivery)', 'Airport pickup', 'WareHub']);
+  });
+
+  it.each(DELIVERY_COLLECTION_OPTIONS)('includes the selected collection method in the quote: %s', (collectionPoint) => {
+    const quote = buildQuoteEmail({ customerName: 'Ada', amount: 12000, route: 'Lagos to Abuja', service: 'Next Day', collectionPoint, customerEmail: 'ada@example.com' });
+    expect(quote.body).toContain(`Collection: ${collectionPoint}`);
   });
 
   it('builds the dated invoice identifier and confirmation invoice email', () => {
@@ -94,17 +101,19 @@ describe('validatePaymentDetails', () => {
       amount: 34500,
       route: 'Port Harcourt to Lagos',
       service: 'Sensitive',
-      collectionPoint: 'Lagos WareHub',
+      collectionPoint: 'LMD (Last mile delivery)',
       invoiceNumber,
     });
     expect(invoiceNumber).toBe('Sbnl-260928-2');
     expect(invoice.body).toContain('Thank you for confirming.');
     expect(invoice.body).toContain('Amount Due: ₦34,500');
-    expect(invoice.body).toContain('WareHub (Lagos WareHub)');
-    const invoiceHtml = buildInvoiceHtml({ customerName: '<Elishah>', amount: 34500, route: 'Port Harcourt to Lagos', service: 'Sensitive', collectionPoint: 'Lagos WareHub', invoiceNumber });
+    expect(invoice.body).toContain('Collection: LMD (Last mile delivery)');
+    const invoiceHtml = buildInvoiceHtml({ customerName: '<Elishah>', amount: 34500, route: 'Port Harcourt to Lagos', service: 'Sensitive', collectionPoint: 'LMD (Last mile delivery)', invoiceNumber });
     expect(invoiceHtml).toContain('Sbnl-260928-2');
     expect(invoiceHtml).toContain('&lt;Elishah&gt;');
     expect(invoiceHtml).toContain('Moniepoint');
+    expect(invoiceHtml).toContain('<strong>LMD (Last mile delivery)</strong>');
+    expect(invoiceHtml).not.toContain('WareHub collection');
   });
 
   it('requires authentication before tracking individual cargo', () => {

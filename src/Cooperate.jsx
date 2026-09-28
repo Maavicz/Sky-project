@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { FaTruckMoving, FaHistory, FaSearch, FaPaperPlane, FaStream } from "react-icons/fa";
+import { DELIVERY_COLLECTION_OPTIONS } from "./testHelpers/emailTemplates.mjs";
 
 export default function Cooperate({ orders = [], booking = {}, setBooking = () => {}, handleBook = () => {}, termsAccepted = false, setTermsAccepted = () => {}, onViewTerms = () => {} }) {
   const [tab, setTab] = useState("delivery");
@@ -112,7 +113,7 @@ export default function Cooperate({ orders = [], booking = {}, setBooking = () =
                 <select value={booking.pickup || ""} onChange={(e)=>setBooking({...booking,pickup:e.target.value})} className="rounded-xl border p-3" aria-label="Pickup location"><option value="">Pickup location</option><option value="PHC">Port Harcourt</option><option value="LOS">Lagos</option><option value="ABJ">Abuja</option></select>
                 <select value={booking.delivery || ""} onChange={(e)=>setBooking({...booking,delivery:e.target.value})} className="rounded-xl border p-3" aria-label="Delivery location"><option value="">Delivery location</option><option value="PHC">Port Harcourt</option><option value="LOS">Lagos</option><option value="ABJ">Abuja</option></select>
                 <select value={booking.service || "Sensitive - Next Day"} onChange={(e)=>setBooking({...booking,service:e.target.value})} className="rounded-xl border p-3" aria-label="Service"><option>Sensitive - Next Day</option><option>Next Day</option><option>Same Day</option></select>
-                <select value={booking.collectionPoint || ""} onChange={(e)=>setBooking({...booking,collectionPoint:e.target.value})} className="rounded-xl border p-3" aria-label="WareHub collection point"><option value="">WareHub collection point</option><option>Port Harcourt WareHub</option><option>Lagos WareHub</option><option>Abuja WareHub</option></select>
+                <select value={booking.collectionPoint || ""} onChange={(e)=>setBooking({...booking,collectionPoint:e.target.value})} className="rounded-xl border p-3" aria-label="Package or cargo collection / delivery method"><option value="">Choose a delivery method</option>{DELIVERY_COLLECTION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select>
               </div>
               <div className="mt-4 flex items-start gap-3 rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
                 <input id="cooperate-booking-terms" type="checkbox" checked={termsAccepted} onChange={(event)=>setTermsAccepted(event.target.checked)} className="mt-1 h-4 w-4 accent-blue-700" />

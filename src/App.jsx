@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { buildBookingTermsAcceptance, validateBooking, buildPaymentSummary, getPaymentOptions } from "./testHelpers/validation.mjs";
-import { buildInvoiceEmail, buildInvoiceHtml, buildInvoiceNumber, buildMailtoUrl, buildQuoteEmail, formatNaira, SBNL_PAYMENT_ACCOUNT } from "./testHelpers/emailTemplates.mjs";
+import { buildInvoiceEmail, buildInvoiceHtml, buildInvoiceNumber, buildMailtoUrl, buildQuoteEmail, DELIVERY_COLLECTION_OPTIONS, formatNaira, SBNL_PAYMENT_ACCOUNT } from "./testHelpers/emailTemplates.mjs";
 import { canAccessTracking, getAdminTabs, getFutureFlightSchedulePreview } from "./testHelpers/appLogic.mjs";
 import {
   FaBell,
@@ -1672,12 +1672,10 @@ export default function App() {
                   </select>
                 </label>
                 <label className="block text-sm font-medium text-slate-700">
-                  WareHub Collection Point
+                  Package or Cargo Collection / Delivery Method
                   <select value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
-                    <option value="">Choose a collection point</option>
-                    <option>Port Harcourt WareHub</option>
-                    <option>Lagos WareHub</option>
-                    <option>Abuja WareHub</option>
+                    <option value="">Choose a delivery method</option>
+                    {DELIVERY_COLLECTION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                   </select>
                 </label>
                 <Field
@@ -1948,12 +1946,10 @@ export default function App() {
                     </select>
                   </label>
                   <label className="block text-sm font-medium text-slate-700">
-                    WareHub Collection Point
+                    Package or Cargo Collection / Delivery Method
                     <select value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
-                      <option value="">Choose a collection point</option>
-                      <option>Port Harcourt WareHub</option>
-                      <option>Lagos WareHub</option>
-                      <option>Abuja WareHub</option>
+                      <option value="">Choose a delivery method</option>
+                      {DELIVERY_COLLECTION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                   </label>
                   <input
