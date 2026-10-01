@@ -14,6 +14,19 @@ body {
   min-height: 100vh;
 }
 
+[data-booking-attempted="true"] :is(input[required]:invalid, select[required]:invalid, textarea[required]:invalid, input[aria-invalid="true"]),
+[data-registration-attempted="true"] :is(input[required]:invalid, select[required]:invalid, textarea[required]:invalid, input[aria-invalid="true"]),
+[data-subadmin-attempted="true"] :is(input[required]:invalid, select[required]:invalid, textarea[required]:invalid, input[aria-invalid="true"]) {
+  border-color: #e11d48 !important;
+  background-color: #fff1f2 !important;
+  box-shadow: 0 0 0 1px #e11d48;
+}
+
+:is([data-booking-attempted="true"], [data-registration-attempted="true"], [data-subadmin-attempted="true"]) input[type="checkbox"][required]:invalid {
+  outline: 2px solid #e11d48;
+  outline-offset: 2px;
+}
+
 .client-portal-theme--dark {
   min-height: calc(100vh - 7rem);
   border-radius: 1.5rem;

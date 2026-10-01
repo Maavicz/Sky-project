@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { buildBookingTermsAcceptance, validateBooking, buildPaymentSummary, getPaymentOptions } from "./testHelpers/validation.mjs";
 import { buildInvoiceEmail, buildInvoiceHtml, buildInvoiceNumber, buildMailtoUrl, buildQuoteEmail, DELIVERY_COLLECTION_OPTIONS, formatNaira, SBNL_PAYMENT_ACCOUNT } from "./testHelpers/emailTemplates.mjs";
-import { appendShipmentEvent, canAccessTracking, ensureShipmentAudit, getAdminTabs, getFutureFlightSchedulePreview, verifyShipmentHandoffPin } from "./testHelpers/appLogic.mjs";
+import { appendShipmentEvent, canAccessTracking, ensureShipmentAudit, getAdminTabs, getFutureFlightSchedulePreview, getRouteHubDirection, verifyShipmentHandoffPin } from "./testHelpers/appLogic.mjs";
 import {
   FaBell,
   FaBoxOpen,
@@ -30,6 +30,7 @@ import {
   FaMoon,
   FaSun,
   FaCog,
+  FaArrowLeft,
 } from "react-icons/fa";
 import heroImage from "../imagery/happy-new-month.png";
 import Field from "./components/Field.jsx";
@@ -43,6 +44,9 @@ import DeliveryTerms, { DELIVERY_TERMS_VERSION } from "./components/DeliveryTerm
 import ShipmentAudit from "./components/ShipmentAudit.jsx";
 import ShipmentPreview from "./components/ShipmentPreview.jsx";
 import AdminSettings from "./components/AdminSettings.jsx";
+import CountryPhoneField from "./components/CountryPhoneField.jsx";
+import CargoHubPage from "./components/CargoHubPage.jsx";
+import { isValidInternationalPhone } from "./testHelpers/phone.mjs";
 
 const services = [
   {
@@ -206,6 +210,7 @@ export default function App() {
   ]);
 
   const [booking, setBooking] = useState({ name: "", email: "", receiverName: "", receiverContact: "", itemDescription: "", quantity: "1", dimensions: "", handlingNotes: "", service: "Sensitive - Next Day", collectionPoint: "", pickup: "", delivery: "", weight: "", contact: "" });
+  const [bookingSubmitAttempted, setBookingSubmitAttempted] = useState(false);
   const [bankAccountCopied, setBankAccountCopied] = useState(false);
     const [termsAccepted, setTermsAccepted] = useState(false);
   const [recentBookingId, setRecentBookingId] = useState("");
@@ -229,6 +234,7 @@ export default function App() {
     { id: "WH-002", name: "Lagos Air Cargo Depot", location: "LOS", occupied: 104, capacity: 140, status: "Operational" },
     { id: "WH-003", name: "Abuja Transit Warehouse", location: "ABJ", occupied: 59, capacity: 80, status: "Operational" },
   ]);
+  const [selectedCargoHubId, setSelectedCargoHubId] = useState("");
   const [warehouseItems, setWarehouseItems] = useState([
     { id: "WHI-001", orderId: "SB-2026-001", description: "Consumer electronics", warehouse: "Port Harcourt Cargo Hub", status: "Awaiting dispatch" },
     { id: "WHI-002", orderId: "SB-2026-002", description: "Medical supplies", warehouse: "Lagos Air Cargo Depot", status: "Cleared" },
@@ -242,6 +248,8 @@ export default function App() {
   });
   const [clientNotice, setClientNotice] = useState("");
   const [showClientRegistration, setShowClientRegistration] = useState(false);
+  const [clientRegistrationSubmitAttempted, setClientRegistrationSubmitAttempted] = useState(false);
+  const [subadminSubmitAttempted, setSubadminSubmitAttempted] = useState(false);
   const [clientTheme, setClientTheme] = useState(() => {
     try {
       return localStorage.getItem("sb_client_theme_v1") === "dark" ? "dark" : "light";
@@ -546,6 +554,22 @@ export default function App() {
     createNotification({ category, title: "Shipment activity", message: `${orderId}: ${event}`, type: "info" });
   };
 
+  const updateShipmentAtHub = (order, action, hub) => {
+    const at = new Date().toISOString();
+    const hubFields = { currentHub: hub.location, currentHubName: hub.name };
+    if (action === "arrived") {
+      recordShipmentUpdate(order.id, { ...hubFields, hubArrivalAt: at, status: "At Hub", cargoStage: "Arrived at hub" }, `Shipment arrived at ${hub.name}`, activeUser || role, at);
+      return;
+    }
+    if (action === "ready") {
+      recordShipmentUpdate(order.id, { ...hubFields, readyForPickupAt: at, status: "Ready for Pickup", cargoStage: "Awaiting client pickup" }, `Shipment ready for client pickup at ${hub.name}`, activeUser || role, at);
+      return;
+    }
+    if (action === "departed") {
+      recordShipmentUpdate(order.id, { ...hubFields, hubDepartureAt: at, status: "In Flight", cargoStage: "Departed hub" }, `Shipment departed ${hub.name}`, activeUser || role, at);
+    }
+  };
+
   const getOrderEmailDetails = (order) => {
     const [pickupCode, deliveryCode] = String(order.route || "").split(" → ");
     const locationNames = { PHC: "Port Harcourt", LOS: "Lagos", ABJ: "Abuja" };
@@ -634,6 +658,7 @@ export default function App() {
   };
 
   const handleBook = () => {
+    setBookingSubmitAttempted(true);
     const termsAcceptance = buildBookingTermsAcceptance({
       accepted: termsAccepted,
       version: DELIVERY_TERMS_VERSION,
@@ -683,6 +708,7 @@ export default function App() {
     setRecentBookingId(newId);
     setBooking({ name: "", email: "", receiverName: "", receiverContact: "", itemDescription: "", quantity: "1", dimensions: "", handlingNotes: "", service: "Sensitive - Next Day", collectionPoint: "", pickup: "", delivery: "", weight: "", contact: "" });
     setTermsAccepted(false);
+    setBookingSubmitAttempted(false);
     setPaymentStage(true);
     setTrackingInput(newId);
     setTrackingResult("Pending");
@@ -951,8 +977,13 @@ export default function App() {
   };
 
   const createSubadminProfile = () => {
+    setSubadminSubmitAttempted(true);
     if (!subadminForm.fullName.trim() || subadminForm.departments.length === 0) {
       pushToast({ type: "error", message: "Please provide a full name and select at least one department." });
+      return;
+    }
+    if (subadminForm.phoneNumber.trim() && !isValidInternationalPhone(subadminForm.phoneNumber)) {
+      pushToast({ type: "error", message: "Enter a valid staff phone number with its country calling code." });
       return;
     }
 
@@ -1016,6 +1047,7 @@ export default function App() {
       jobType: "Permanent",
       dateOfEntry: new Date().toISOString().split("T")[0],
     });
+    setSubadminSubmitAttempted(false);
   };
 
   const updateSubadminStatus = (profileId, nextStatus) => {
@@ -1050,9 +1082,14 @@ export default function App() {
   };
 
   const saveProfileChanges = () => {
+    setSubadminSubmitAttempted(true);
     if (!editingProfileId) return;
     if (!subadminForm.fullName.trim() || subadminForm.departments.length === 0) {
       pushToast({ type: "error", message: "Please provide a full name and select at least one department." });
+      return;
+    }
+    if (subadminForm.phoneNumber.trim() && !isValidInternationalPhone(subadminForm.phoneNumber)) {
+      pushToast({ type: "error", message: "Enter a valid staff phone number with its country calling code." });
       return;
     }
 
@@ -1065,6 +1102,7 @@ export default function App() {
     );
     setProfileNotice(`Profile updated successfully for ${subadminForm.fullName.trim()}`);
     setEditingProfileId(null);
+    setSubadminSubmitAttempted(false);
     setSubadminForm({
       fullName: "",
       email: "",
@@ -1081,8 +1119,13 @@ export default function App() {
   };
 
   const registerClientPortal = () => {
+    setClientRegistrationSubmitAttempted(true);
     if (!clientRegistration.companyName.trim() || !clientRegistration.contactName.trim() || !clientRegistration.email.trim() || !clientRegistration.phone.trim()) {
       pushToast({ type: "error", message: "Please complete all corporate registration fields." });
+      return;
+    }
+    if (!isValidInternationalPhone(clientRegistration.phone)) {
+      pushToast({ type: "error", message: "Enter a valid phone number with its country calling code." });
       return;
     }
 
@@ -1108,6 +1151,7 @@ export default function App() {
     setClientNotice(`Corporate profile created. Username: ${username} | Password: ${generatedPassword}`);
     setClientRegistration({ companyName: "", contactName: "", email: "", phone: "" });
     setShowClientRegistration(false);
+    setClientRegistrationSubmitAttempted(false);
     setLogin({ user: username, pass: generatedPassword });
     setRole("client");
     navigateTo("client", { require: ["client"] });
@@ -1211,6 +1255,7 @@ export default function App() {
   };
   const roleOptions = ["Rider A", "Rider B", "Operations Manager A", "Operations Manager B", "Operations Manager C", "Operations Manager D", "ICT", "Workforce1", "Workforce2", "Workforce3"];
   const locationOptions = ["Lagos", "Abuja", "Port Harcourt"];
+  const selectedCargoHub = warehouses.find((warehouse) => warehouse.id === selectedCargoHubId) || null;
 
   return (
     <div className="min-h-screen bg-[#f5f8ff] text-slate-900" style={page === "admin" && role === "admin" ? { backgroundColor: { mist: "#f5f8ff", white: "#ffffff", "cool-gray": "#e8edf1" }[adminSettings.backgroundColor] || "#f5f8ff" } : undefined}>
@@ -1249,18 +1294,6 @@ export default function App() {
               className="flex items-center gap-2 rounded-full px-3 py-2 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-50 hover:text-blue-700"
             >
               <FaUsers /> Client Portal
-            </button>
-            <button
-              onClick={() => {
-                if (role === "admin" || role === "subadmin") {
-                  navigateTo("admin");
-                } else {
-                  navigateTo("login");
-                }
-              }}
-              className="flex items-center gap-2 rounded-full px-3 py-2 transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-50 hover:text-blue-700"
-            >
-              <FaUserShield /> {role === "guest" ? "Admin login" : "Admin dashboard"}
             </button>
             {role !== "guest" && (
               <button
@@ -1540,6 +1573,7 @@ export default function App() {
                     <li><button type="button" onClick={() => navigateTo("track")} className="text-left transition hover:text-white">Tracking</button></li>
                     <li><button type="button" onClick={() => navigateTo("client")} className="text-left transition hover:text-white">Client portal</button></li>
                     <li><button type="button" onClick={() => navigateTo("terms")} className="text-left transition hover:text-white">Delivery terms</button></li>
+                    <li><button type="button" onClick={() => role === "admin" || role === "subadmin" ? navigateTo("admin") : navigateTo("login")} className="text-left transition hover:text-white">Admin portal</button></li>
                   </ul>
                 </div>
 
@@ -1682,7 +1716,7 @@ export default function App() {
         )}
 
         {page === "book" && (
-          <div className="rounded-[2rem] bg-white p-10 shadow-xl ring-1 ring-slate-200 sm:max-w-3xl sm:mx-auto">
+          <div data-booking-attempted={bookingSubmitAttempted} className="rounded-[2rem] bg-white p-10 shadow-xl ring-1 ring-slate-200 sm:max-w-3xl sm:mx-auto">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-blue-700">Book a delivery</p>
@@ -1733,6 +1767,7 @@ export default function App() {
                 <Field
                   id="customer-name"
                   label="Customer Name"
+                  required
                   value={booking.name}
                   onChange={(e) => setBooking({ ...booking, name: e.target.value })}
                   placeholder="e.g. Ada Okafor"
@@ -1742,6 +1777,7 @@ export default function App() {
                   id="customer-email"
                   label="Customer Email"
                   type="email"
+                  required
                   value={booking.email}
                   onChange={(e) => setBooking({ ...booking, email: e.target.value })}
                   placeholder="you@example.com"
@@ -1752,6 +1788,7 @@ export default function App() {
                   <div className="font-medium">Pickup Location</div>
                   <select
                     aria-label="Pickup Location"
+                    required
                     className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     value={booking.pickup}
                     onChange={(e) => setBooking({ ...booking, pickup: e.target.value })}
@@ -1764,6 +1801,7 @@ export default function App() {
                 </label>
                 <select
                   aria-label="Delivery Location"
+                  required
                   className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   value={booking.delivery}
                   onChange={(e) => setBooking({ ...booking, delivery: e.target.value })}
@@ -1783,7 +1821,7 @@ export default function App() {
                 </label>
                 <label className="block text-sm font-medium text-slate-700">
                   Package or Cargo Collection / Delivery Method
-                  <select value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                  <select required value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
                     <option value="">Choose a delivery method</option>
                     {DELIVERY_COLLECTION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                   </select>
@@ -1791,38 +1829,42 @@ export default function App() {
                 <Field
                   id="weight"
                   label="Package Weight (kg)"
+                  required
                   value={booking.weight}
                   onChange={(e) => setBooking({ ...booking, weight: e.target.value })}
                   placeholder="e.g. 2.5"
                   className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                 />
-                <Field
+                <CountryPhoneField
                   id="contact"
-                  label="Contact Number"
+                  label="Sender contact number"
                   value={booking.contact}
-                  onChange={(e) => setBooking({ ...booking, contact: e.target.value })}
-                  placeholder="e.g. 08012345678"
-                  className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  onChange={(value) => setBooking({ ...booking, contact: value })}
+                  required
+                  submitted={bookingSubmitAttempted}
+                  className="sm:col-span-1"
                 />
                 <Field
                   id="receiver-name"
                   label="Receiver Name"
+                  required
                   value={booking.receiverName}
                   onChange={(e) => setBooking({ ...booking, receiverName: e.target.value })}
                   placeholder="e.g. Tunde Bello"
                   className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                 />
-                <Field
+                <CountryPhoneField
                   id="receiver-contact"
-                  label="Receiver Contact Number"
+                  label="Receiver contact number"
                   value={booking.receiverContact}
-                  onChange={(e) => setBooking({ ...booking, receiverContact: e.target.value })}
-                  placeholder="e.g. 08087654321"
-                  className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  onChange={(value) => setBooking({ ...booking, receiverContact: value })}
+                  required
+                  submitted={bookingSubmitAttempted}
                 />
                 <Field
                   id="item-description"
                   label="Cargo Description"
+                  required
                   value={booking.itemDescription}
                   onChange={(e) => setBooking({ ...booking, itemDescription: e.target.value })}
                   placeholder="Describe the shipment contents"
@@ -1830,7 +1872,7 @@ export default function App() {
                 />
                 <label className="block text-sm font-medium text-slate-700">
                   Quantity
-                  <input type="number" min="1" step="1" value={booking.quantity} onChange={(e) => setBooking({ ...booking, quantity: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                  <input required type="number" min="1" step="1" value={booking.quantity} onChange={(e) => setBooking({ ...booking, quantity: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
                 </label>
                 <label className="block text-sm font-medium text-slate-700">
                   Dimensions (optional)
@@ -1841,8 +1883,8 @@ export default function App() {
                   <textarea value={booking.handlingNotes} onChange={(e) => setBooking({ ...booking, handlingNotes: e.target.value })} rows="3" className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
                 </label>
               </div>
-              <div className="mt-6 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <input id="booking-terms" type="checkbox" aria-required="true" aria-describedby="booking-terms-description" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-blue-700" />
+              <div className={`mt-6 flex items-start gap-3 rounded-2xl border bg-slate-50 p-4 ${bookingSubmitAttempted && !termsAccepted ? "border-rose-500 ring-2 ring-rose-200" : "border-slate-200"}`}>
+                <input id="booking-terms" type="checkbox" required aria-required="true" aria-describedby="booking-terms-description" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-blue-700" />
                 <div id="booking-terms-description" className="text-sm leading-6 text-slate-700">
                   <label htmlFor="booking-terms">I have read and agree to the Delivery Booking Terms &amp; Conditions.</label>
                   <button type="button" onClick={() => navigateTo("terms")} className="ml-1 font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-900">Read the full terms</button>
@@ -1864,8 +1906,8 @@ export default function App() {
             )}
 
             {paymentStage && (
-              <div className="mt-6 rounded-[1.75rem] border border-blue-200 bg-blue-50 p-6 text-slate-900 shadow-sm">
-                <p className="text-sm uppercase tracking-[0.3em] text-blue-700">Payment required</p>
+              <aside role="region" aria-label="Payment required for the new booking" aria-live="polite" className="fixed inset-x-3 top-20 z-[70] mx-auto max-h-[calc(100vh-6rem)] w-auto overflow-y-auto rounded-2xl border border-blue-200 bg-blue-50 p-5 text-slate-900 shadow-2xl sm:inset-x-auto sm:right-6 sm:w-[min(42rem,calc(100vw-3rem))] sm:p-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Payment required · {recentBookingId}</p>
                 <h3 className="mt-3 text-xl font-semibold">Complete your booking payment</h3>
                 <p className="mt-2 text-slate-600">Your shipment has been reserved. Please confirm payment to activate the booking and notify our team.</p>
                 <div className="mt-6 space-y-4">
@@ -1907,7 +1949,7 @@ export default function App() {
                   </button>
                   <p className="text-sm text-slate-600">{paymentMethod === "Bank Transfer" ? "This records a transfer notification only. SBNL will verify funds before marking the shipment paid." : "Card and POS processing require a connected payment provider; this demo does not charge a payment method."}</p>
                 </div>
-              </div>
+              </aside>
             )}
             <div className="mt-6 text-center">
               <p className="text-slate-600 mb-4">Or use our detailed booking form:</p>
@@ -1950,30 +1992,36 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <div className="mt-6 space-y-4">
+              <div data-registration-attempted={clientRegistrationSubmitAttempted} className="mt-6 space-y-4">
                 <input
+                  required
                   placeholder="Company name"
                   className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   value={clientRegistration.companyName}
                   onChange={(e) => setClientRegistration({ ...clientRegistration, companyName: e.target.value })}
                 />
                 <input
+                  required
                   placeholder="Contact person"
                   className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   value={clientRegistration.contactName}
                   onChange={(e) => setClientRegistration({ ...clientRegistration, contactName: e.target.value })}
                 />
                 <input
+                  required
+                  type="email"
                   placeholder="Email"
                   className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                   value={clientRegistration.email}
                   onChange={(e) => setClientRegistration({ ...clientRegistration, email: e.target.value })}
                 />
-                <input
-                  placeholder="Phone number"
-                  className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                <CountryPhoneField
+                  id="client-registration-phone"
+                  label="Phone number"
                   value={clientRegistration.phone}
-                  onChange={(e) => setClientRegistration({ ...clientRegistration, phone: e.target.value })}
+                  onChange={(phone) => setClientRegistration({ ...clientRegistration, phone })}
+                  required
+                  submitted={clientRegistrationSubmitAttempted}
                 />
                 <button
                   onClick={registerClientPortal}
@@ -1998,7 +2046,7 @@ export default function App() {
         )}
 
         {page === "client" && role === "client" && (
-          <div className={`client-portal-theme space-y-8 ${clientTheme === "dark" ? "client-portal-theme--dark" : ""}`}>
+          <div data-booking-attempted={bookingSubmitAttempted} className={`client-portal-theme space-y-8 ${clientTheme === "dark" ? "client-portal-theme--dark" : ""}`}>
             <div className="rounded-[2rem] bg-white p-8 shadow-xl ring-1 ring-slate-200">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -2026,6 +2074,7 @@ export default function App() {
                 <p className="mt-2 text-slate-600">Schedule cargo movement with corporate support and priority routing.</p>
                 <div className="mt-6 space-y-4">
                   <input
+                    required
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     placeholder="Customer Name"
                     value={booking.name}
@@ -2033,6 +2082,7 @@ export default function App() {
                   />
                   <input
                     type="email"
+                    required
                     autoComplete="email"
                     aria-label="Customer email"
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -2042,6 +2092,7 @@ export default function App() {
                   />
                   <select
                     aria-label="Delivery location"
+                    required
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     value={booking.pickup}
                     onChange={(e) => setBooking({ ...booking, pickup: e.target.value })}
@@ -2052,6 +2103,7 @@ export default function App() {
                     <option value="ABJ">Abuja</option>
                   </select>
                   <select
+                    required
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     value={booking.delivery}
                     onChange={(e) => setBooking({ ...booking, delivery: e.target.value })}
@@ -2071,39 +2123,45 @@ export default function App() {
                   </label>
                   <label className="block text-sm font-medium text-slate-700">
                     Package or Cargo Collection / Delivery Method
-                    <select value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                    <select required value={booking.collectionPoint} onChange={(e) => setBooking({ ...booking, collectionPoint: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
                       <option value="">Choose a delivery method</option>
                       {DELIVERY_COLLECTION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                   </label>
                   <input
+                    required
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     placeholder="Package Weight (kg)"
                     value={booking.weight}
                     onChange={(e) => setBooking({ ...booking, weight: e.target.value })}
                   />
-                  <input
-                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    placeholder="Contact Number"
+                  <CountryPhoneField
+                    id="corporate-sender-contact"
+                    label="Sender contact number"
                     value={booking.contact}
-                    onChange={(e) => setBooking({ ...booking, contact: e.target.value })}
+                    onChange={(value) => setBooking({ ...booking, contact: value })}
+                    required
+                    submitted={bookingSubmitAttempted}
                   />
                   <input
                     aria-label="Receiver name"
+                    required
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     placeholder="Receiver name"
                     value={booking.receiverName}
                     onChange={(e) => setBooking({ ...booking, receiverName: e.target.value })}
                   />
-                  <input
-                    aria-label="Receiver contact number"
-                    className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                    placeholder="Receiver contact number"
+                  <CountryPhoneField
+                    id="corporate-receiver-contact"
+                    label="Receiver contact number"
                     value={booking.receiverContact}
-                    onChange={(e) => setBooking({ ...booking, receiverContact: e.target.value })}
+                    onChange={(value) => setBooking({ ...booking, receiverContact: value })}
+                    required
+                    submitted={bookingSubmitAttempted}
                   />
                   <input
                     aria-label="Cargo description"
+                    required
                     className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                     placeholder="Cargo description"
                     value={booking.itemDescription}
@@ -2111,7 +2169,7 @@ export default function App() {
                   />
                   <label className="block text-sm font-medium text-slate-700">
                     Quantity
-                    <input type="number" min="1" step="1" value={booking.quantity} onChange={(e) => setBooking({ ...booking, quantity: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                    <input required type="number" min="1" step="1" value={booking.quantity} onChange={(e) => setBooking({ ...booking, quantity: e.target.value })} className="mt-1 w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
                   </label>
                   <input
                     aria-label="Dimensions (optional)"
@@ -2128,8 +2186,8 @@ export default function App() {
                     onChange={(e) => setBooking({ ...booking, handlingNotes: e.target.value })}
                     rows="3"
                   />
-                  <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <input id="corporate-booking-terms" type="checkbox" aria-required="true" aria-describedby="corporate-booking-terms-description" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-blue-700" />
+                  <div className={`flex items-start gap-3 rounded-2xl border bg-slate-50 p-4 ${bookingSubmitAttempted && !termsAccepted ? "border-rose-500 ring-2 ring-rose-200" : "border-slate-200"}`}>
+                    <input id="corporate-booking-terms" type="checkbox" required aria-required="true" aria-describedby="corporate-booking-terms-description" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-blue-700" />
                     <div id="corporate-booking-terms-description" className="text-sm leading-6 text-slate-700">
                       <label htmlFor="corporate-booking-terms">I have read and agree to the Delivery Booking Terms &amp; Conditions.</label>
                       <button type="button" onClick={() => navigateTo("terms")} className="ml-1 font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-900">Read the full terms</button>
@@ -2144,13 +2202,13 @@ export default function App() {
                 </div>
               </div>
               {paymentStage && recentBookingId && (
-                <div className="rounded-[2rem] border border-emerald-200 bg-white p-6 shadow-xl lg:col-start-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800">Booking payment</p>
+                <aside role="region" aria-label="Payment required for the corporate booking" aria-live="polite" className="fixed inset-x-3 top-20 z-[70] mx-auto max-h-[calc(100vh-6rem)] w-auto overflow-y-auto rounded-2xl border border-emerald-200 bg-white p-5 shadow-2xl sm:inset-x-auto sm:right-6 sm:w-[min(34rem,calc(100vw-3rem))] sm:p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800">Payment required · {recentBookingId}</p>
                   <h3 className="mt-2 text-xl font-semibold text-slate-900">Transfer for {recentBookingId}</h3>
                   <p className="mt-2 mb-4 text-sm text-slate-600">Your booking is reserved. Transfer confirmation is not payment verification.</p>
                   {paymentMethodFields["Bank Transfer"]}
                   <button type="button" onClick={handlePaymentDone} className="mt-4 w-full rounded-2xl bg-emerald-800 px-5 py-4 text-sm font-semibold text-white hover:bg-emerald-900">I have made the transfer</button>
-                </div>
+                </aside>
               )}
               <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
                 <h3 className="text-xl font-semibold text-slate-900">Track a shipment</h3>
@@ -2246,11 +2304,32 @@ export default function App() {
           </div>
         )}
 
+        {page === "hub" && role === "admin" && selectedCargoHub && (
+          <CargoHubPage
+            hub={selectedCargoHub}
+            orders={orders}
+            flightSchedules={flightSchedules}
+            subadminProfiles={subadminProfiles}
+            paymentHistory={paymentHistory}
+            onClose={() => { setSelectedCargoHubId(""); setPage("admin"); setAdminTab("overview"); }}
+            onUpdateStage={updateShipmentAtHub}
+          />
+        )}
+
         {page === "admin" && (role === "admin" || role === "subadmin") && (
           <div className="space-y-8">
             <div className="rounded-[2rem] bg-white p-8 shadow-xl ring-1 ring-slate-200">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => navigateTo("home")}
+                    aria-label="Return to home"
+                    title="Return to home"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <FaArrowLeft aria-hidden="true" />
+                  </button>
                   {role === "subadmin" && currentSubadminProfile?.profileImage ? (
                     <img
                       src={currentSubadminProfile.profileImage}
@@ -2558,6 +2637,7 @@ export default function App() {
                         <p>Occupied: {warehouse.occupied}/{warehouse.capacity}</p>
                         <p>Status: {warehouse.status}</p>
                       </div>
+                      {role === "admin" && <div className="mt-5 flex justify-end"><button type="button" onClick={() => { setSelectedCargoHubId(warehouse.id); setPage("hub"); }} className="min-h-10 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">View</button></div>}
                     </div>
                   ))}
                 </div>
@@ -2741,7 +2821,7 @@ export default function App() {
             )}
 
             {adminTab === "profiles" && (
-              <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+              <div data-subadmin-attempted={subadminSubmitAttempted} className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
                 <div className="rounded-[2rem] bg-white p-6 shadow-xl ring-1 ring-slate-200">
                   <div className="flex items-center gap-2 text-blue-700">
                     <FaUserShield />
@@ -2750,6 +2830,7 @@ export default function App() {
                   <p className="mt-2 text-slate-600">Register a new sub-admin, define their role details, and automatically issue login credentials.</p>
                   <div className="mt-6 space-y-4">
                     <input
+                      required
                       className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                       placeholder="Full name"
                       value={subadminForm.fullName}
@@ -2762,12 +2843,12 @@ export default function App() {
                       value={subadminForm.email}
                       onChange={(e) => setSubadminForm({ ...subadminForm, email: e.target.value })}
                     />
-                    <input
-                      type="tel"
-                      className="w-full rounded-3xl border border-slate-200 bg-slate-50 px-5 py-4 text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                      placeholder="Phone number"
+                    <CountryPhoneField
+                      id="staff-profile-phone"
+                      label="Phone number"
                       value={subadminForm.phoneNumber}
-                      onChange={(e) => setSubadminForm({ ...subadminForm, phoneNumber: e.target.value })}
+                      onChange={(phoneNumber) => setSubadminForm({ ...subadminForm, phoneNumber })}
+                      submitted={subadminSubmitAttempted}
                     />
                     <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-4">
                       <label className="block text-sm font-semibold text-slate-700">Profile picture</label>
@@ -2785,8 +2866,8 @@ export default function App() {
                         />
                       )}
                     </div>
-                    <div>
-                      <p className="mb-3 text-sm font-semibold text-slate-700">Departments</p>
+                    <div className={subadminSubmitAttempted && subadminForm.departments.length === 0 ? "rounded-lg border border-rose-500 p-3 ring-2 ring-rose-100" : ""} aria-invalid={subadminSubmitAttempted && subadminForm.departments.length === 0}>
+                      <p className="mb-3 text-sm font-semibold text-slate-700">Departments (required)</p>
                       <div className="grid gap-3 sm:grid-cols-2">
                         {departmentOptions.map((dept) => (
                           <label key={dept} className="flex items-center gap-2 cursor-pointer">
@@ -3134,7 +3215,7 @@ export default function App() {
                   <h3 className="text-xl font-semibold text-slate-900">Cooperate Panel</h3>
                   <p className="mt-2 text-slate-600">Tools and views tailored to your assigned shipments.</p>
                   <div className="mt-4">
-                    <Cooperate orders={visibleOrders} booking={booking} setBooking={setBooking} handleBook={handleBook} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onViewTerms={() => navigateTo("terms")} />
+                    <Cooperate orders={visibleOrders} booking={booking} setBooking={setBooking} handleBook={handleBook} bookingSubmitAttempted={bookingSubmitAttempted} termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted} onViewTerms={() => navigateTo("terms")} />
                   </div>
                 </div>
               </div>

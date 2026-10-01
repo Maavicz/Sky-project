@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 // Small unit tests for booking and tracking logic extracted from App.jsx
-import { appendShipmentEvent, computeNewId, ensureShipmentAudit, getAdminTabs, getFutureFlightSchedulePreview, verifyShipmentHandoffPin } from '../src/testHelpers/appLogic.mjs';
+import { appendShipmentEvent, computeNewId, ensureShipmentAudit, getAdminTabs, getFutureFlightSchedulePreview, getHubStaff, getRouteHubDirection, verifyShipmentHandoffPin } from '../src/testHelpers/appLogic.mjs';
 
 describe('shipment audit history', () => {
   it('records status changes with an actor and timestamp while preserving prior events', () => {
@@ -33,6 +33,24 @@ describe('shipment handoff PIN', () => {
     expect(verifyShipmentHandoffPin('2468', '1111')).toBe(false);
     expect(verifyShipmentHandoffPin('12', '12')).toBe(false);
     expect(verifyShipmentHandoffPin('', '')).toBe(false);
+  });
+});
+
+describe('cargo hub routing', () => {
+  it('classifies incoming and outgoing routes across airport aliases', () => {
+    expect(getRouteHubDirection('PH → Lagos', 'Port Harcourt')).toBe('outgoing');
+    expect(getRouteHubDirection('PHC → LOS', 'Lagos')).toBe('incoming');
+    expect(getRouteHubDirection('Abuja to PHC', 'PH')).toBe('incoming');
+    expect(getRouteHubDirection('LOS → ABJ', 'PHC')).toBeNull();
+  });
+
+  it('matches active staff assigned to the hub location', () => {
+    const profiles = [
+      { username: 'ph-staff', workLocation: 'Port Harcourt', status: 'Active' },
+      { username: 'lagos-staff', workLocation: 'Lagos', status: 'Active' },
+      { username: 'inactive-ph', workLocation: 'PHC', status: 'Suspended' },
+    ];
+    expect(getHubStaff(profiles, 'PHC').map((profile) => profile.username)).toEqual(['ph-staff']);
   });
 });
 

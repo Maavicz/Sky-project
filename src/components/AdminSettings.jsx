@@ -1,4 +1,6 @@
 import { useState } from "react";
+import CountryPhoneField from "./CountryPhoneField.jsx";
+import { isValidInternationalPhone } from "../testHelpers/phone.mjs";
 import {
   FaBell,
   FaBookOpen,
@@ -109,6 +111,10 @@ export default function AdminSettings({ settings, orders, activeUser, onUpdateSe
 
   const saveProfile = (event) => {
     event.preventDefault();
+    if (profileDraft.phone && !isValidInternationalPhone(profileDraft.phone)) {
+      setNotice("Enter a valid phone number with its country calling code.");
+      return;
+    }
     onUpdateSettings({ profile: profileDraft });
     setNotice("Profile details saved on this device.");
   };
@@ -185,7 +191,7 @@ export default function AdminSettings({ settings, orders, activeUser, onUpdateSe
             <form onSubmit={saveProfile} className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-medium text-slate-700">Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" /></label>
               <label className="text-sm font-medium text-slate-700">Work email<input type="email" value={profileDraft.email} onChange={(event) => setProfileDraft({ ...profileDraft, email: event.target.value })} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" /></label>
-              <label className="text-sm font-medium text-slate-700">Phone<input type="tel" value={profileDraft.phone} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })} className="mt-1 block min-h-11 w-full rounded-lg border border-slate-300 px-3" /></label>
+              <CountryPhoneField id="admin-profile-phone" label="Phone" value={profileDraft.phone} onChange={(phone) => setProfileDraft({ ...profileDraft, phone })} />
               <div className="flex items-end"><button type="submit" className="min-h-11 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">Save profile</button></div>
             </form>
             <form onSubmit={changePassword} className="grid gap-4 border-t border-slate-200 pt-6 sm:grid-cols-2">

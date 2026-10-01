@@ -11,6 +11,30 @@ export function verifyShipmentHandoffPin(savedPin, enteredPin) {
   return /^\d{4,8}$/.test(String(savedPin ?? "")) && String(savedPin) === String(enteredPin ?? "");
 }
 
+function normalizeHubLocation(value) {
+  const location = String(value ?? "").trim().toLowerCase();
+  if (["ph", "phc", "port harcourt", "port-harcourt"].includes(location)) return "PHC";
+  if (["los", "lagos"].includes(location)) return "LOS";
+  if (["abj", "abuja"].includes(location)) return "ABJ";
+  return location;
+}
+
+export function getRouteHubDirection(route, hub) {
+  const endpoints = String(route ?? "").split(/\s*(?:→|->|\bto\b)\s*/i);
+  if (endpoints.length < 2) return null;
+  const origin = normalizeHubLocation(endpoints[0]);
+  const destination = normalizeHubLocation(endpoints[1]);
+  const hubCode = normalizeHubLocation(hub);
+  if (destination === hubCode) return "incoming";
+  if (origin === hubCode) return "outgoing";
+  return null;
+}
+
+export function getHubStaff(profiles = [], hub) {
+  const hubCode = normalizeHubLocation(hub);
+  return profiles.filter((profile) => normalizeHubLocation(profile.workLocation) === hubCode && profile.status === "Active");
+}
+
 export function appendShipmentEvent(order, changes, event, { actor = "system", at = new Date().toISOString() } = {}) {
   const history = Array.isArray(order.history) ? order.history : [];
   const statusChanged = Object.hasOwn(changes, "status") && changes.status !== order.status;

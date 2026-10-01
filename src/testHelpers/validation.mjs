@@ -1,3 +1,5 @@
+import { isValidInternationalPhone } from "./phone.mjs";
+
 export function validateBooking(booking = {}) {
   const name = String(booking.name ?? "").trim();
   const receiverName = String(booking.receiverName ?? "").trim();
@@ -21,12 +23,7 @@ export function validateBooking(booking = {}) {
     return { ok: false };
   }
 
-  const phoneDigits = contact.replace(/\D/g, "");
-  const isValidPhone = /^\+?[0-9()\-\s]{10,15}$/.test(contact) && phoneDigits.length >= 10;
-  const receiverPhoneDigits = receiverContact.replace(/\D/g, "");
-  const isValidReceiverPhone = /^\+?[0-9()\-\s]{10,15}$/.test(receiverContact) && receiverPhoneDigits.length >= 10;
-
-  if (!isValidPhone || !isValidReceiverPhone) {
+  if (!isValidInternationalPhone(contact) || !isValidInternationalPhone(receiverContact)) {
     return { ok: false };
   }
 
